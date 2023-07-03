@@ -1,5 +1,5 @@
 batch_size: 4096
-ckp_key: state_dict
+ckp_key: model
 crop_size: 224
 dataset: ImageNet
 epochs: 90

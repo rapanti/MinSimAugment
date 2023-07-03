@@ -11,17 +11,13 @@ import torch.backends.cudnn as cudnn
 import torch.optim
 import torch.utils.data
 import torch.utils.data.distributed
+from omegaconf import OmegaConf
 from torch.utils.tensorboard import SummaryWriter
-import torchvision.models as models
 
 import data
 import distributed as dist
 import optimizers
 import utils
-
-model_names = sorted(name for name in models.__dict__
-                     if name.islower() and not name.startswith("__")
-                     and callable(models.__dict__[name]))
 
 
 def main(cfg):
@@ -29,11 +25,12 @@ def main(cfg):
     cudnn.benchmark = True
 
     print("git:\n  {}\n".format(utils.get_sha()))
-    print("\n".join("%s: %s" % (k, str(v)) for k, v in sorted(dict(vars(cfg)).items())))
+    print(OmegaConf.to_yaml(cfg))
 
     if cfg.dataset == "CIFAR10":
-        global models
         import resnet_cifar as models
+    else:
+        import resnet_imagenet as models
 
     # prepare data
     if cfg.dataset == "CIFAR10":
@@ -240,39 +237,49 @@ def adjust_learning_rate(optimizer, init_lr, epoch, args):
 
 
 def get_args_parser():
-    parser = argparse.ArgumentParser(description='PyTorch Eval-Linear ImageNet', add_help=False)
-    parser.add_argument('--dataset', default="ImageNet", help='Specify dataset.')
-    parser.add_argument('--data_path', help='path to dataset')
-    parser.add_argument('--arch', default='resnet50')
-    parser.add_argument('--num_workers', default=8, type=int, help='number of data loading workers (default: 8)')
-    parser.add_argument('--epochs', default=90, type=int, help='number of total epochs to run')
-
-    parser.add_argument('--batch-size', default=4096, type=int,
-                        help='total-batch-size (default: 4096), this is the total')
-    parser.add_argument('--lr', default=0.1, type=float,
-                        help='initial (base) learning rate', dest='lr')
-    parser.add_argument('--momentum', default=0.9, type=float,
-                        help='momentum')
-    parser.add_argument('--wd', '--weight_decay', default=0., type=float, dest='weight_decay',
-                        help='weight decay (default: 0.)')
-    parser.add_argument('--resize_size', default=256, type=int, help="Size of images before center-crop")
-    parser.add_argument('--crop_size', default=224, type=int, help="Size of center-crop")
-    parser.add_argument('--lars', default=True, type=utils.bool_flag,
-                        help="Whether or not to use LARS optimizer. Otherwise SGD.")
+    p = argparse.ArgumentParser(description='PyTorch Eval-Linear ImageNet', add_help=False)
+    p.add_argument('--dataset', default="ImageNet", type=str,
+                   help='Specify dataset. (default: ImageNet)')
+    p.add_argument('--data_path', type=str,
+                   help='(root) path to dataset')
+    p.add_argument('-a', '--arch', type=str,
+                   help="Name of architecture to train (default: resnet50)")
+    p.add_argument('--epochs', type=int,
+                   help='number of total epochs to run (default: 90)')
+    p.add_argument('-b', '--batch-size', type=int,
+                   help='total-batch-size (default: 4096)')
+    p.add_argument('--lr', type=float,
+                   help='initial (base) learning rate (default: 0.1)')
+    p.add_argument('--momentum', type=float,
+                   help='momentum (default: 0.9)')
+    p.add_argument('--wd', '--weight_decay', type=float, dest='weight_decay',
+                   help='weight decay (default: 0.)')
+    p.add_argument('--resize_size', type=int,
+                   help="Resize size of images before center-crop (default: 256)")
+    p.add_argument('--crop_size', type=int,
+                   help="Size of center-crop (default: 224)")
+    p.add_argument('--lars', default=True, type=utils.bool_flag,
+                   help="Whether or not to use LARS optimizer (default: True)")
 
     # additional configs:
-    parser.add_argument('--pretrained', default='checkpoint.pth', type=str,
-                        help='path to simsiam pretrained checkpoint')
-    parser.add_argument('--output_dir', default=".", type=str, help='Path to save logs and checkpoints.')
-    parser.add_argument('--ckp_key', default="model", type=str, help='Checkpoint key.')
-    parser.add_argument("--val_freq", default=1, type=int, help="Validate model every x epochs.")
-    parser.add_argument("--logger_freq", default=50, type=int, help="Log progress every x iterations to tensorboard.")
-    parser.add_argument('--dist-url', default='env://', type=str,
-                        help='url used to set up distributed training')
-    parser.add_argument('--dist-backend', default='nccl', type=str,
-                        help='distributed backend')
+    p.add_argument('--pretrained', default="checkpoint.pth", type=str,
+                   help="path to simsiam pretrained checkpoint (default: checkpoint.pth)")
+    p.add_argument('--output_dir', default=".", type=str,
+                   help='Path to save logs and checkpoints (default: .)')
+    p.add_argument('--ckp_key', default="model", type=str,
+                   help='Checkpoint key (default: model)')
+    p.add_argument('--val_freq', default=1, type=int,
+                   help="Validate model every x epochs (default: 1)")
+    p.add_argument('--logger_freq', default=50, type=int,
+                   help="Log progress every x iterations to tensorboard (default: 50)")
+    p.add_argument('--dist-url', default="env://", type=str,
+                   help="url used to set up distributed training (default: env://)")
+    p.add_argument('--dist-backend', default="nccl", type=str,
+                   help="distributed backend (default: nccl)")
+    p.add_argument('--num_workers', default=8, type=int,
+                   help="number of data loading workers (default: 8)")
 
-    return parser
+    return p
 
 
 if __name__ == '__main__':

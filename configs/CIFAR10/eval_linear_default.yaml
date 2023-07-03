@@ -1,5 +1,5 @@
 batch_size: 256
-ckp_key: state_dict
+ckp_key: model
 crop_size: 32
 dataset: CIFAR10
 epochs: 100

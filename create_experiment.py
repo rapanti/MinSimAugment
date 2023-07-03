@@ -1,7 +1,9 @@
 import argparse
 from pathlib import Path
 import subprocess
-import yaml
+import sys
+
+from omegaconf import OmegaConf
 
 from pretrain import get_args_parser as pretrain_get_args_parser
 from eval_linear import get_args_parser as eval_linear_get_args_parser
@@ -16,50 +18,75 @@ if __name__ == "__main__":
     slurm_parser.add_argument("--array", default=0, type=int,
                               help="If n > 0 submits a job array n+1 jobs")
     slurm_parser.add_argument("--time", default="23:59:59", type=str)
-    slurm_parser.add_argument("--head", default="simsiam-vanilla", type=str)
+    slurm_parser.add_argument("--head", default="simsiam-minsim", type=str)
     slurm_parser.add_argument("--descr", default="baseline", type=str)
     slurm_parser.add_argument("--exp_dir", default=None, type=str)
 
     pretrain_parser = pretrain_get_args_parser()
     eval_linear_parser = eval_linear_get_args_parser()
 
-    while True:
-        print("Specify slurm parameter: ENTER for default; -h for -help")
-        line = input()
-        if line == "-h":
-            slurm_parser.print_usage()
-            continue
-        slurm_args = slurm_parser.parse_args(line.split())
-        break
-
-    while True:
-        print("Specify pretrain parameters: ENTER for default; -h for -help")
-        line = input()
-        if line == "-h":
-            pretrain_parser.print_usage()
-            continue
-        args = pretrain_parser.parse_args(line.split())
-        break
-
-    print("Multiple Seeds? Either type specific seeds or #seeds (0-%seeds) else 0")
-    line = input()
-    if line:
-        if line.startswith('#'):
-            num = line.lstrip('#')
-            seeds = list(range(int(num)))
-        elif len(line.split()):
-            seeds = list(map(int, line.split()))
+    if len(sys.argv) > 1:
+        slurm_args, rest = slurm_parser.parse_known_args()
+        pretrain_args = pretrain_parser.parse_args(rest)
+        path_to_def = f"configs/{pretrain_args.dataset}/pretrain_default.yaml"
+        args = OmegaConf.load(path_to_def)
+        for arg in vars(pretrain_args):
+            value = pretrain_args.__dict__[arg]
+            if value is not None:
+                args[arg] = value
+        seeds = [args.seed]
+        path_to_def = f"configs/{pretrain_args.dataset}/eval_linear_default.yaml"
+        eval_linear_args = OmegaConf.load(path_to_def)
     else:
-        seeds = [0]
+        while True:
+            print("Specify slurm parameter: ENTER for default; -h for help")
+            line = input()
+            if line == "-h":
+                slurm_parser.print_usage()
+                continue
+            slurm_args = slurm_parser.parse_args(line.split())
+            break
 
-    while True:
-        print("Specify eval parameters: ENTER for default; -h for -help")
+        while True:
+            print("Specify pretrain parameters: ENTER for default; -h for help")
+            line = input()
+            if line == "-h":
+                pretrain_parser.print_usage()
+                continue
+            temp = pretrain_parser.parse_args(line.split())
+            path_to_def = f"configs/{temp.dataset}/pretrain_default.yaml"
+            args = OmegaConf.load(path_to_def)
+            for arg in vars(temp):
+                value = temp.__dict__[arg]
+                if value is not None:
+                    args[arg] = value
+            break
+
+        print("Multiple Seeds? Either type specific seeds or #seeds (0-%seeds) else 0")
         line = input()
-        if line == "-h":
-            eval_linear_parser.print_usage()
-            continue
-        eval_linear_args = eval_linear_parser.parse_args(line.split())
-        break
+        if line:
+            if line.startswith('#'):
+                num = line.lstrip('#')
+                seeds = list(range(int(num)))
+            elif len(line.split()):
+                seeds = list(map(int, line.split()))
+        else:
+            seeds = [0]
+
+        while True:
+            print("Specify eval parameters: ENTER for default; -h for -help")
+            line = input()
+            if line == "-h":
+                eval_linear_parser.print_usage()
+                continue
+            temp = eval_linear_parser.parse_args(line.split())
+            path_to_def = f"configs/{args.dataset}/eval_linear_default.yaml"
+            eval_linear_args = OmegaConf.load(path_to_def)
+            for arg in vars(temp):
+                value = temp.__dict__[arg]
+                if value is not None:
+                    eval_linear_args[arg] = value
+            break
 
     exp_dir = "/work/dlclarge2/rapanti-MinSimAugment/experiments" \
         if slurm_args.exp_dir is None else slurm_args.exp_dir
@@ -72,26 +99,27 @@ if __name__ == "__main__":
         else:
             raise ValueError(f"Dataset '{args.dataset}' has no default path. Specify path to dataset.")
 
+    # make sure that these arguments are the same
+    eval_linear_args.arch = args.arch
+    eval_linear_args.dataset = args.dataset
+    eval_linear_args.data_path = args.data_path
+
     for seed in seeds:
         args.seed = seed
         exp_name = f"{slurm_args.head}-{slurm_args.descr}" \
                    f"-{args.arch}-{args.dataset}-ep{args.epochs}-bs{args.batch_size}" \
+                   f"-select_{args.select_fn}-ncrops{args.num_crops}" \
                    f"-lr{args.lr}-wd{args.weight_decay}-mom{args.momentum}-seed{args.seed}"
         output_dir = Path(exp_dir).joinpath(exp_name)
         output_dir.mkdir(parents=True, exist_ok=True)
         args.output_dir = str(output_dir)
+        eval_linear_args.output_dir = str(output_dir)
         print(f"Experiment: {output_dir}")
 
-        # just to make sure that these arguments are the same
-        eval_linear_args.arch = args.arch
-        eval_linear_args.dataset = args.dataset
-        eval_linear_args.data_path = args.data_path
-        eval_linear_args.output_dir = args.output_dir
-
         with open(output_dir.joinpath("pretrain.yaml"), mode="w", encoding="utf-8") as file:
-            yaml.safe_dump(dict(vars(args)), file)
+            OmegaConf.save(config=args, f=file)
         with open(output_dir.joinpath("eval_linear.yaml"), mode="w", encoding="utf-8") as file:
-            yaml.safe_dump(dict(vars(eval_linear_args)), file)
+            OmegaConf.save(config=eval_linear_args, f=file)
 
         slurm_dir = output_dir.joinpath("slurm")
         slurm_dir.mkdir(parents=True, exist_ok=True)

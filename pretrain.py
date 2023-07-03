@@ -12,18 +12,15 @@ import torch.nn.parallel
 import torch.backends.cudnn as cudnn
 import torch.optim
 import torch.utils.data
-import torchvision.models as models
+from omegaconf import OmegaConf
 from torch.utils.data import DistributedSampler, DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 import data
 import distributed as dist
 import builder
+import select_crops
 import utils
-
-model_names = sorted(name for name in models.__dict__
-                     if name.islower() and not name.startswith("__")
-                     and callable(models.__dict__[name]))
 
 
 def main(cfg):
@@ -32,15 +29,19 @@ def main(cfg):
     cudnn.benchmark = True
 
     print(f"git:\n  {utils.get_sha()}\n")
-    print("\n".join("%s: %s" % (k, str(v)) for k, v in sorted(dict(vars(cfg)).items())))
+    print(OmegaConf.to_yaml(cfg))
 
     if cfg.dataset == "CIFAR10":
-        global models
         import resnet_cifar as models
+        proj_layer = 2
+    else:
+        import resnet_imagenet as models
+        proj_layer = 3
 
     model = builder.SimSiam(
         models.__dict__[cfg.arch],
-        cfg.dim, cfg.pred_dim
+        cfg.dim, cfg.pred_dim,
+        proj_layer,
     ).cuda()
 
     if utils.has_batchnorms(model):
@@ -75,7 +76,7 @@ def main(cfg):
         mean=mean,
         std=std,
     )
-    two_crops_transform = data.TwoCropsTransform(transform)
+    two_crops_transform = data.TwoCropsTransform(transform, cfg.num_crops)
     dataset, _ = data.make_dataset(cfg.data_path, cfg.dataset, True, two_crops_transform)
 
     sampler = DistributedSampler(dataset)
@@ -88,6 +89,8 @@ def main(cfg):
         pin_memory=True,
         drop_last=True,
     )
+
+    select_fn = select_crops.names[cfg.select_fn]
 
     # ============ optionally resume training ... ============
     to_restore = {"epoch": 0, "total_time": 0}
@@ -109,14 +112,13 @@ def main(cfg):
         adjust_learning_rate(optimizer, init_lr, epoch, cfg)
 
         start = time.time()
-        train_stats = train(loader, model, criterion, optimizer, epoch, cfg, fp16, board)
+        train_stats = train(loader, model, criterion, optimizer, epoch, cfg, fp16, board, select_fn)
         total_time += int(time.time() - start)
 
         save_dict = {
             "model": model.state_dict(),
             "optimizer": optimizer.state_dict(),
             "epoch": epoch + 1,
-            "args": cfg,
             "fp16": fp16.state_dict() if fp16 is not None else None,
             "total_time": total_time,
         }
@@ -133,15 +135,16 @@ def main(cfg):
     print('Training time {}'.format(total_time_str))
 
 
-def train(loader, model, criterion, optimizer, epoch, cfg, fp16, board):
+def train(loader, model, criterion, optimizer, epoch, cfg, fp16, board, select_fn):
     model.train()
     metric_logger = utils.MetricLogger(delimiter=" ")
     header = 'Epoch: [{}/{}]'.format(epoch, cfg.epochs)
     for it, (images, _) in enumerate(metric_logger.log_every(loader, cfg.print_freq, header)):
         it = len(loader) * epoch + it  # global training iteration
 
-        x1 = images[0].cuda(non_blocking=True)
-        x2 = images[1].cuda(non_blocking=True)
+        images = [im.cuda(non_blocking=True) for im in images]
+
+        x1, x2 = select_fn(images, model, fp16)
 
         with torch.cuda.amp.autocast(fp16 is not None):
             p1, p2, z1, z2 = model(x1=x1, x2=x2)
@@ -182,42 +185,64 @@ def adjust_learning_rate(optimizer, init_lr, epoch, args):
 
 def get_args_parser():
     p = argparse.ArgumentParser("SimSiam", description='Pytorch Pretraining on ImageNet', add_help=False)
-    p.add_argument('--dataset', default="ImageNet", type=str)
-    p.add_argument('--data_path', type=str, help='path to training data.')
-    p.add_argument('-a', '--arch', default="resnet50", type=str)
-    p.add_argument('--epochs', default=100, type=int, help='number of total epochs to run')
-    p.add_argument('-b', '--batch_size', default=512, type=int,
+    p.add_argument('--dataset', type=str, default="ImageNet",
+                   help='Specify dataset (default: ImageNet)')
+    p.add_argument('--data_path', type=str,
+                   help='(root) path to dataset')
+    p.add_argument('-a', '--arch', type=str,
+                   help="Name of architecture to train (default: resnet50)")
+    p.add_argument('--epochs', type=int,
+                   help='number of total epochs to run (default: 100)')
+    p.add_argument('-b', '--batch_size', type=int,
                    help='total batch-size (default: 512)')
-    p.add_argument('--lr', default=0.05, type=float, help='initial (base) learning rate')
-    p.add_argument('--momentum', default=0.9, type=float, help='momentum of SGD solver')
-    p.add_argument('--wd', '--weight_decay', default=1e-4, type=float, help='weight decay (default: 1e-4)',
-                   dest="weight_decay")
-    p.add_argument('--fp16', default=True, type=utils.bool_flag,
-                   help="Whether or not to use half precision for training.")
+    p.add_argument('--lr', type=float,
+                   help='initial (base) learning rate (default: 0.05)')
+    p.add_argument('--momentum', type=float,
+                   help='momentum of SGD solver (default: 0.9)')
+    p.add_argument('--wd', '--weight_decay', dest="weight_decay", type=float,
+                   help='weight decay (default: 1e-4)')
 
-    # simsiam specific configs:
-    p.add_argument('--dim', default=2048, type=int,
+    # simsiam specific parameters:
+    p.add_argument('--dim', type=int,
                    help='feature dimension (default: 2048)')
-    p.add_argument('--pred_dim', default=512, type=int,
+    p.add_argument('--pred_dim', type=int,
                    help='hidden dimension of the predictor (default: 512)')
-    p.add_argument('--fix_pred_lr', default=True, type=utils.bool_flag,
-                   help='Fix learning rate for the predictor')
+    p.add_argument('--fix_pred_lr', type=utils.bool_flag,
+                   help='Fix learning rate for the predictor (default: True)')
 
-    # data augmentation configs:
-    p.add_argument("--crop_size", default=224, type=int, help="Size of the crops.")
-    p.add_argument("--crop_scale", default=(0.2, 1.0), type=float, nargs='+', help="Size of the crops.")
-    p.add_argument("--blur_prob", default=0.5, type=float, help="Blur probability.")
-    p.add_argument("--hflip_prob", default=0.5, type=float, help="Horizontal Flip.")
+    # data augmentation parameters:
+    p.add_argument("--crop_size", type=int,
+                   help="Size of crops (default: 224)")
+    p.add_argument("--crop_scale", type=float, nargs='+',
+                   help="Scale range of the crops, relative to original image (default: 0.2 1.)")
+    p.add_argument("--blur_prob", type=float,
+                   help="Blur probability (default: 0.5)")
+    p.add_argument("--hflip_prob", type=float,
+                   help="Horizontal-Flip probability (default: 0.5)")
+
+    # MinSim parameters:
+    p.add_argument("--num_crops", default=4, type=int, help="Number of crops")
+    p.add_argument("--select_fn", default="cross", type=str, choices=select_crops.names)
 
     # Misc
-    p.add_argument('--output_dir', default=".", type=str, help='Path to save logs and checkpoints.')
-    p.add_argument('--saveckp_freq', default=0, type=int, help='Save checkpoint every x epochs.')
-    p.add_argument('--seed', default=0, type=int, help='Random seed.')
-    p.add_argument('--num_workers', default=8, type=int, help='Number of data loading workers per GPU.')
-    p.add_argument("--dist_backend", default="nccl", type=str, help="Distributed backend.")
-    p.add_argument("--dist_url", default="env://", type=str, help="url used to set up distributed training")
-    p.add_argument("--print_freq", default=10, type=int, help="Print progress every x iterations.")
-    p.add_argument("--logger_freq", default=50, type=int, help="Log progress every x iterations to tensorboard.")
+    p.add_argument('--fp16', default=True, type=utils.bool_flag,
+                   help="Whether or not to use half precision for training. (default: True)")
+    p.add_argument('--output_dir', type=str,
+                   help='Path to save logs and checkpoints.')
+    p.add_argument('--saveckp_freq', default=0, type=int,
+                   help='Save checkpoint every x epochs.')
+    p.add_argument('--seed', default=0, type=int,
+                   help='Random seed.')
+    p.add_argument('--num_workers', default=8, type=int,
+                   help='Number of data loading workers per GPU.')
+    p.add_argument("--dist_backend", default="nccl", type=str,
+                   help="distributed backend (default: nccl)")
+    p.add_argument("--dist_url", default="env://", type=str,
+                   help="url used to set up distributed training")
+    p.add_argument("--print_freq", default=10, type=int,
+                   help="Print progress every x iterations (default: 10)")
+    p.add_argument("--logger_freq", default=50, type=int,
+                   help="Log progress every x iterations to tensorboard (default: 50)")
 
     return p
 

@@ -1,7 +1,7 @@
 arch: resnet18
 batch_size: 512
 blur_prob: 0.0
-crop_scale: !!python/tuple
+crop_scale:
 - 0.2
 - 1.0
 crop_size: 32
@@ -14,3 +14,8 @@ lr: 0.06
 momentum: 0.9
 pred_dim: 512
 weight_decay: 0.0005
+# MinSim parameters
+select_fn: cross
+# Misc parameters
+data_path: null
+output_dir: null
