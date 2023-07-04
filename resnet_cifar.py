@@ -110,10 +110,15 @@ class ResNet(nn.Module):
         x = self.fc(x)
         return x
 
+    def conv1_layer(self, x):
+        x = nnf.relu(self.bn1(self.conv1(x)))
+
+        x = self.avgpool(x)
+        x = torch.flatten(x, 1)
+        return x
+
     def first_layer(self, x):
-        x = self.conv1(x)
-        x = self.bn1(x)
-        x = self.relu(x)
+        x = nnf.relu(self.bn1(self.conv1(x)))
 
         x = self.layer1(x)
         x = self.avgpool(x)

@@ -70,6 +70,10 @@ class SimSiam(nn.Module):
         return p, z
 
     @torch.no_grad()
+    def conv1_layer(self, x):
+        return self.encoder.conv1_layer(x)
+
+    @torch.no_grad()
     def first_layer(self, x):
         return self.encoder.first_layer(x)
 

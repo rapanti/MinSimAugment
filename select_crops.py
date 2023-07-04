@@ -61,6 +61,35 @@ def select_crops_avgpool(images, model, fp16):
 
 
 @torch.no_grad()
+def select_crops_conv1_layer(images, model, fp16):
+    b, c, h, w = images[0].shape
+    device = images[0].device
+
+    with torch.cuda.amp.autocast(fp16 is not None):
+        model_out = model.module.conv1_layer(torch.cat(images, dim=0))
+    activations = model_out.chunk(len(images))
+
+    out1 = torch.zeros_like(images[0])
+    out2 = torch.zeros_like(images[0])
+    score = torch.full([b], torch.inf, device=device)
+
+    for n, x in enumerate(activations):
+        e1 = activations[n]
+        for m in range(n + 1, len(activations)):
+            e2 = activations[m]
+
+            with torch.cuda.amp.autocast(fp16 is not None):
+                sim = nnf.cosine_similarity(e1, e2)
+                score, indices = torch.stack((score, sim)).min(dim=0)
+                indices = indices.type(torch.bool)
+
+            out1 = torch.where(indices[:, None, None, None], images[n], out1)
+            out2 = torch.where(indices[:, None, None, None], images[m], out2)
+
+    return out1, out2
+
+
+@torch.no_grad()
 def select_crops_first_layer(images, model, fp16):
     b, c, h, w = images[0].shape
     device = images[0].device
@@ -136,6 +165,7 @@ def select_crops_anchor(images, model, fp16):
 names = {
     "anchor": select_crops_anchor,
     "cross": select_crops_cross,
+    "conv1layer": select_crops_conv1_layer,
     "firstlayer": select_crops_first_layer,
     "secondlayer": select_crops_second_layer,
     "avgpool": select_crops_avgpool,
