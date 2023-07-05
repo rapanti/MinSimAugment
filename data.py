@@ -13,15 +13,21 @@ CIFAR10_DEFAULT_MEAN = (0.4914, 0.4822, 0.4465)
 CIFAR10_DEFAULT_STD = (0.2023, 0.1994, 0.2010)
 
 
-class TwoCropsTransform:
-    """Take two random crops of one image as the query and key."""
+class MultiCropsTransform:
+    """Take multiple random crops of one image as the query and key."""
 
     def __init__(self, base_transform, num_crops):
         self.base_transform = base_transform
         self.num_crops = num_crops
 
     def __call__(self, x):
-        return [self.base_transform(x) for _ in range(self.num_crops)]
+        images = []
+        params = []
+        for _ in range(self.num_crops):
+            img, p = self.base_transform(x)
+            images.append(img)
+            params.append(p)
+        return images, params
 
 
 def make_normalize_transform(

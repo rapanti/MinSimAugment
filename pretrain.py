@@ -20,7 +20,16 @@ import data
 import distributed as dist
 import builder
 import select_crops
+import custom_transform
 import utils
+
+
+def custom_collate(batch):
+    bs = len(batch[0][0][0])
+    images = [torch.stack([item[0][0][n] for item in batch]) for n in range(bs)]
+    params = [[item[0][1][n] for item in batch] for n in range(bs)]
+    # target = [item[1] for item in batch]
+    return images, params
 
 
 def main(cfg):
@@ -68,7 +77,7 @@ def main(cfg):
     else:
         mean, std = data.IMAGENET_DEFAULT_MEAN, data.IMAGENET_DEFAULT_STD
 
-    transform = data.make_pretrain_transform(
+    transform = custom_transform.TransformParams(
         crop_size=cfg.crop_size,
         crop_scale=cfg.crop_scale,
         blur_prob=cfg.blur_prob,
@@ -76,8 +85,8 @@ def main(cfg):
         mean=mean,
         std=std,
     )
-    two_crops_transform = data.TwoCropsTransform(transform, cfg.num_crops)
-    dataset, _ = data.make_dataset(cfg.data_path, cfg.dataset, True, two_crops_transform)
+    multi_crops_transform = data.MultiCropsTransform(transform, cfg.num_crops)
+    dataset, _ = data.make_dataset(cfg.data_path, cfg.dataset, True, multi_crops_transform)
 
     sampler = DistributedSampler(dataset)
     cfg.batch_size_per_gpu = cfg.batch_size // dist.get_world_size()
@@ -88,6 +97,7 @@ def main(cfg):
         num_workers=cfg.num_workers,
         pin_memory=True,
         drop_last=True,
+        collate_fn=custom_collate,
     )
 
     select_fn = select_crops.names[cfg.select_fn]
@@ -112,7 +122,7 @@ def main(cfg):
         adjust_learning_rate(optimizer, init_lr, epoch, cfg)
 
         start = time.time()
-        train_stats = train(loader, model, criterion, optimizer, epoch, cfg, fp16, board, select_fn)
+        train_stats, metrics = train(loader, model, criterion, optimizer, epoch, cfg, fp16, board, select_fn)
         total_time += int(time.time() - start)
 
         save_dict = {
@@ -130,6 +140,9 @@ def main(cfg):
         if dist.is_main_process():
             with (Path(cfg.output_dir) / "pretrain.log").open("a") as f:
                 f.write(json.dumps(log_stats) + "\n")
+        if dist.is_main_process():
+            with (Path(cfg.output_dir) / "metrics.json").open("a") as f:
+                f.write(json.dumps(metrics) + "\n")
 
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
@@ -137,14 +150,22 @@ def main(cfg):
 
 def train(loader, model, criterion, optimizer, epoch, cfg, fp16, board, select_fn):
     model.train()
+    metrics = {
+        "epoch": epoch,
+        "loss": [],
+        "lr": [],
+        "selected": [],
+        "params": [],
+        "sample-loss": [],
+    }
     metric_logger = utils.MetricLogger(delimiter=" ")
     header = 'Epoch: [{}/{}]'.format(epoch, cfg.epochs)
-    for it, (images, _) in enumerate(metric_logger.log_every(loader, cfg.print_freq, header)):
+    for it, (images, params) in enumerate(metric_logger.log_every(loader, cfg.print_freq, header)):
         it = len(loader) * epoch + it  # global training iteration
 
         images = [im.cuda(non_blocking=True) for im in images]
 
-        x1, x2 = select_fn(images, model, fp16)
+        x1, x2, selected, sample_loss = select_fn(images, model, fp16)
 
         with torch.cuda.amp.autocast(fp16 is not None):
             p1, p2, z1, z2 = model(x1=x1, x2=x2)
@@ -164,13 +185,20 @@ def train(loader, model, criterion, optimizer, epoch, cfg, fp16, board, select_f
         metric_logger.update(loss=loss.item())
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
 
+        metrics["loss"].append(loss.item())
+        metrics["lr"].append(optimizer.param_groups[0]["lr"])
+        if cfg.use_adv_metric and it % cfg.adv_metric_freq == 0:
+            metrics["selected"].append(selected.tolist())
+            metrics["params"].append(params)
+            metrics["sample-loss"].append(sample_loss.tolist())
+
         if dist.is_main_process() and it % cfg.logger_freq == 0:
             board.add_scalar("training loss", loss.item(), it)
             board.add_scalar("training lr", optimizer.param_groups[0]["lr"], it)
 
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}, metrics
 
 
 def adjust_learning_rate(optimizer, init_lr, epoch, args):
@@ -243,6 +271,10 @@ def get_args_parser():
                    help="Print progress every x iterations (default: 10)")
     p.add_argument("--logger_freq", default=50, type=int,
                    help="Log progress every x iterations to tensorboard (default: 50)")
+    p.add_argument("--use_adv_metric", default=False, type=utils.bool_flag,
+                   help="Log advanced metrics: transforms params, crop selection, sample-loss, ... (default: False)")
+    p.add_argument("--adv_metric_freq", default=100, type=int,
+                   help="Log advanced metrics every x iterations (default: 100)")
 
     return p
 
