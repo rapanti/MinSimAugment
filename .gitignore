@@ -157,5 +157,3 @@ cython_debug/
 
 # Misc
 exp/
-cluster/
-testing/

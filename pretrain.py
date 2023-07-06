@@ -112,7 +112,7 @@ def main(cfg):
         adjust_learning_rate(optimizer, init_lr, epoch, cfg)
 
         start = time.time()
-        train_stats = train(loader, model, criterion, optimizer, epoch, cfg, fp16, board, select_fn)
+        train_stats, metrics = train(loader, model, criterion, optimizer, epoch, cfg, fp16, board, select_fn)
         total_time += int(time.time() - start)
 
         save_dict = {
@@ -130,6 +130,9 @@ def main(cfg):
         if dist.is_main_process():
             with (Path(cfg.output_dir) / "pretrain.log").open("a") as f:
                 f.write(json.dumps(log_stats) + "\n")
+        if dist.is_main_process():
+            with (Path(cfg.output_dir) / "metrics.json").open("a") as f:
+                f.write(json.dumps(metrics) + "\n")
 
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
@@ -137,6 +140,11 @@ def main(cfg):
 
 def train(loader, model, criterion, optimizer, epoch, cfg, fp16, board, select_fn):
     model.train()
+    metrics = {
+        "epoch": epoch,
+        "loss": [],
+        "lr": [],
+    }
     metric_logger = utils.MetricLogger(delimiter=" ")
     header = 'Epoch: [{}/{}]'.format(epoch, cfg.epochs)
     for it, (images, _) in enumerate(metric_logger.log_every(loader, cfg.print_freq, header)):
@@ -163,6 +171,12 @@ def train(loader, model, criterion, optimizer, epoch, cfg, fp16, board, select_f
         torch.cuda.synchronize()
         metric_logger.update(loss=loss.item())
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
+
+        metrics["loss"].append(loss.item())
+        metrics["lr"].append(optimizer.param_groups[0]["lr"])
+        if cfg.use_adv_metric and it % cfg.adv_metric_freq == 0:
+            # in this branch not implemented yet
+            pass
 
         if dist.is_main_process() and it % cfg.logger_freq == 0:
             board.add_scalar("training loss", loss.item(), it)
@@ -243,6 +257,10 @@ def get_args_parser():
                    help="Print progress every x iterations (default: 10)")
     p.add_argument("--logger_freq", default=50, type=int,
                    help="Log progress every x iterations to tensorboard (default: 50)")
+    p.add_argument("--use_adv_metric", default=False, type=utils.bool_flag,
+                   help="Log advanced metrics: transforms params, crop selection, sample-loss, ... (default: False)")
+    p.add_argument("--adv_metric_freq", default=100, type=int,
+                   help="Log advanced metrics every x iterations (default: 100)")
 
     return p
 
