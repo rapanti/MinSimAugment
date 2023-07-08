@@ -15,16 +15,16 @@ momentum: 0.9
 pred_dim: 512
 weight_decay: 0.0005
 select_fn: cross
-data_path: ..\datasets\CIFAR10  # /data/datasets/ImageNet/imagenet-pytorch
+data_path: ../datasets/CIFAR10  # /data/datasets/ImageNet/imagenet-pytorch
 output_dir: exp
 num_crops: 4
 fp16: true
 saveckp_freq: 0
 seed: 42
 num_workers: 8
-dist_backend: nccl  # gloo
+dist_backend: nccl
 dist_url: env://
 print_freq: 10
 logger_freq: 50
-use_adv_metric: false
+use_adv_metric: true
 adv_metric_freq: 100

@@ -16,4 +16,4 @@ dist_url: env://
 dist_backend: nccl  # gloo
 num_workers: 8
 arch: resnet18
-data_path: ..\datasets\CIAFR10  # /data/datasets/ImageNet/imagenet-pytorch
+data_path: ..\datasets\CIFAR10  # /data/datasets/ImageNet/imagenet-pytorch

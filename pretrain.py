@@ -184,7 +184,7 @@ def train(loader, model, criterion, optimizer, epoch, cfg, fp16, board, select_f
 
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}, metrics
 
 
 def adjust_learning_rate(optimizer, init_lr, epoch, args):

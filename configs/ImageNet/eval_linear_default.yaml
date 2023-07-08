@@ -6,5 +6,12 @@ epochs: 90
 lars: true
 lr: 0.1
 momentum: 0.9
+pretrained: checkpoint.pth
 resize_size: 256
 weight_decay: 0.0
+# Misc
+dist_url: env://
+dist_backend: nccl
+num_workers: 8
+val_freq: 1
+logger_freq: 50
