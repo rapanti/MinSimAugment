@@ -157,7 +157,3 @@ cython_debug/
 
 # Misc
 exp/
-cluster/
-testing/
-pretrain.yaml
-eval_linear.yaml
