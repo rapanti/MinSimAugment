@@ -1,21 +1,36 @@
-arch: resnet50
+arch: vit_small
 batch_size: 512
-blur_prob: 0.5
-crop_scale:
-- 0.2
-- 1.0
-crop_size: 224
+clip_grad: 3.0
 dataset: ImageNet
-dim: 2048
+drop_path_rate: 0.1
 epochs: 100
-fix_pred_lr: true
-hflip_prob: 0.5
-lr: 0.05
-momentum: 0.9
-pred_dim: 512
-weight_decay: 0.0001
-# MinSim parameters
+freeze_last_layer: 1
+global_crops_scale:
+- 0.4
+- 1.0
+global_crops_size: 224
+img_size: 224
+local_crops_number: 8
+local_crops_scale:
+- 0.05
+- 0.4
+local_crops_size: 96
+lr: 0.0005
+min_lr: 1.0e-06
+momentum_teacher: 0.996
+norm_last_layer: true
+num_crops: 4
+optimizer: adamw
+out_dim: 65536
+patch_size: 16
 select_fn: cross
+teacher_temp: 0.04
+weight_decay: 0.04
+use_bn_in_head: false
+warmup_teacher_temp: 0.04
+warmup_teacher_temp_epochs: 0
+weight_decay_end: 0.4
+warmup_epochs: 10
 # Misc parameters
 data_path: null
 output_dir: null

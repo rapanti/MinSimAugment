@@ -146,21 +146,21 @@ class ResNet(nn.Module):
         return x
 
 
-def resnet18(**args):
+def resnet18_cifar(**args):
     return ResNet(BasicBlock, [2, 2, 2, 2], **args)
 
 
-def resnet34(**args):
+def resnet34_cifar(**args):
     return ResNet(BasicBlock, [3, 4, 6, 3], **args)
 
 
-def resnet50(**args):
+def resnet50_cifar(**args):
     return ResNet(Bottleneck, [3, 4, 6, 3], **args)
 
 
-def resnet101(**args):
+def resnet101_cifar(**args):
     return ResNet(Bottleneck, [3, 4, 23, 3], **args)
 
 
-def resnet152(**args):
+def resnet152_cifar(**args):
     return ResNet(Bottleneck, [3, 8, 36, 3], **args)

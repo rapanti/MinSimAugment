@@ -18,7 +18,7 @@ if __name__ == "__main__":
     slurm_parser.add_argument("--array", default=0, type=int,
                               help="If n > 0 submits a job array n+1 jobs")
     slurm_parser.add_argument("--time", default="23:59:59", type=str)
-    slurm_parser.add_argument("--head", default="simsiam-minsim", type=str)
+    slurm_parser.add_argument("--head", default="dino-minsim", type=str)
     slurm_parser.add_argument("--descr", default="baseline", type=str)
     slurm_parser.add_argument("--exp_dir", default=None, type=str)
 
@@ -80,7 +80,7 @@ if __name__ == "__main__":
                 eval_linear_parser.print_usage()
                 continue
             temp = eval_linear_parser.parse_args(line.split())
-            path_to_def = f"configs/{args.dataset}/eval_linear_default.yaml"
+            path_to_def = f"configs/{temp.dataset}/eval_linear_default.yaml"
             eval_linear_args = OmegaConf.load(path_to_def)
             for arg in vars(temp):
                 value = temp.__dict__[arg]
@@ -106,10 +106,11 @@ if __name__ == "__main__":
 
     for seed in seeds:
         args.seed = seed
+        ps = f"_p{args.patch_size}" if "vit" in args.arch else ""
         exp_name = f"{slurm_args.head}-{slurm_args.descr}" \
-                   f"-{args.arch}-{args.dataset}-ep{args.epochs}-bs{args.batch_size}" \
+                   f"-{args.arch+ps}-{args.dataset}-ep{args.epochs}-bs{args.batch_size}" \
                    f"-select_{args.select_fn}-ncrops{args.num_crops}" \
-                   f"-lr{args.lr}-wd{args.weight_decay}-mom{args.momentum}-seed{args.seed}"
+                   f"-lr{args.lr}-wd{args.weight_decay}-out_dim{str(args.out_dim//1000)+'k'}-seed{args.seed}"
         output_dir = Path(exp_dir).joinpath(exp_name)
         output_dir.mkdir(parents=True, exist_ok=True)
         args.output_dir = str(output_dir)

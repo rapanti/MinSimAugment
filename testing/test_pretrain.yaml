@@ -1,28 +1,44 @@
-arch: resnet18
+arch: vit_tiny
 batch_size: 128
-blur_prob: 0.0
-crop_scale:
-- 0.2
+clip_grad: 3.0
+dataset: CIFAR10
+drop_path_rate: 0.1
+epochs: 400
+freeze_last_layer: 1
+global_crops_scale:
+- 0.4
 - 1.0
-crop_size: 32  # 224
-dataset: CIFAR10  # ImageNet
-dim: 2048
-epochs: 800
-fix_pred_lr: true
-hflip_prob: 0.5
-lr: 0.06
-momentum: 0.9
-pred_dim: 512
-weight_decay: 0.0005
-select_fn: cross
-data_path: ../datasets/CIFAR10  # /data/datasets/ImageNet/imagenet-pytorch
-output_dir: exp
+global_crops_size: 32
+img_size: 32
+local_crops_number: 8
+local_crops_scale:
+- 0.05
+- 0.4
+local_crops_size: 16
+lr: 0.0005
+min_lr: 1.0e-06
+momentum_teacher: 0.996
+norm_last_layer: true
 num_crops: 4
+optimizer: adamw
+out_dim: 4096
+patch_size: 4
+select_fn: cross
+teacher_temp: 0.04
+weight_decay: 0.04
+use_bn_in_head: false
+warmup_teacher_temp: 0.04
+warmup_teacher_temp_epochs: 0
+weight_decay_end: 0.4
+warmup_epochs: 10
+# Misc parameters
+data_path: ../datasets/CIFAR10
+output_dir: exp
 fp16: true
 saveckp_freq: 0
-seed: 42
+seed: 0
 num_workers: 8
-dist_backend: nccl
+dist_backend: gloo
 dist_url: env://
 print_freq: 10
 logger_freq: 50

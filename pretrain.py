@@ -2,8 +2,10 @@ import argparse
 import json
 import math
 import os
+import sys
 import time
 import datetime
+from collections import defaultdict
 from pathlib import Path
 
 import torch
@@ -16,11 +18,25 @@ from omegaconf import OmegaConf
 from torch.utils.data import DistributedSampler, DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
+import custom_transform
 import data
 import distributed as dist
-import builder
+import optimizers
 import select_crops
 import utils
+from utils_dino import MultiCropWrapper, DINOHead, DINOLoss
+
+import resnet_cifar
+import resnet_imagenet
+import vision_transformer as vits
+
+
+def custom_collate(batch):
+    ncrops = len(batch[0][0][0])
+    images = [torch.stack([item[0][0][n] for item in batch]) for n in range(ncrops)]
+    params = [[item[0][1][n] for item in batch] for n in range(ncrops)]
+    # target = [item[1] for item in batch]
+    return images, params
 
 
 def main(cfg):
@@ -31,64 +47,148 @@ def main(cfg):
     print(f"git:\n  {utils.get_sha()}\n")
     print(OmegaConf.to_yaml(cfg))
 
-    if cfg.dataset == "CIFAR10":
-        import resnet_cifar as models
-        proj_layer = 2
-    else:
-        import resnet_imagenet as models
-        proj_layer = 3
-
-    model = builder.SimSiam(
-        models.__dict__[cfg.arch],
-        cfg.dim, cfg.pred_dim,
-        proj_layer,
-    ).cuda()
-
-    if utils.has_batchnorms(model):
-        model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
-    model = nn.parallel.DistributedDataParallel(model, device_ids=[cfg.gpu])
-
-    init_lr = cfg.lr * cfg.batch_size / 256
-
-    criterion = nn.CosineSimilarity(dim=1).cuda()
-
-    if cfg.fix_pred_lr:
-        optim_params = [{'params': model.module.encoder.parameters(), 'fix_lr': False},
-                        {'params': model.module.predictor.parameters(), 'fix_lr': True}]
-    else:
-        optim_params = model.parameters()
-
-    optimizer = torch.optim.SGD(optim_params, init_lr, momentum=cfg.momentum, weight_decay=cfg.weight_decay)
-
-    fp16 = torch.cuda.amp.GradScaler() if cfg.fp16 else None
-
     # ============ preparing data ... ============
     if cfg.dataset == "CIFAR10":
         mean, std = data.CIFAR10_DEFAULT_MEAN, data.CIFAR10_DEFAULT_STD
     else:
         mean, std = data.IMAGENET_DEFAULT_MEAN, data.IMAGENET_DEFAULT_STD
 
-    transform = data.make_pretrain_transform(
-        crop_size=cfg.crop_size,
-        crop_scale=cfg.crop_scale,
-        blur_prob=cfg.blur_prob,
-        hflip_prob=cfg.hflip_prob,
+    gt1 = custom_transform.TransformParams(
+        crop_size=cfg.global_crops_size,
+        crop_scale=cfg.global_crops_scale,
+        blur_prob=1.0,
+        hflip_prob=0.5,
+        solarize_prob=0.0,
         mean=mean,
         std=std,
     )
-    two_crops_transform = data.TwoCropsTransform(transform, cfg.num_crops)
+    gt2 = custom_transform.TransformParams(
+        crop_size=cfg.global_crops_size,
+        crop_scale=cfg.global_crops_scale,
+        blur_prob=0.1,
+        hflip_prob=0.5,
+        solarize_prob=0.2,
+        mean=mean,
+        std=std,
+    )
+    lt = custom_transform.TransformParams(
+        crop_size=cfg.local_crops_size,
+        crop_scale=cfg.local_crops_scale,
+        blur_prob=0.5,
+        hflip_prob=0.5,
+        solarize_prob=0.0,
+        mean=mean,
+        std=std,
+    )
+    two_crops_transform = data.MultiCropsTransform(gt1, gt2, lt, cfg.num_crops, cfg.local_crops_number)
     dataset, _ = data.make_dataset(cfg.data_path, cfg.dataset, True, two_crops_transform)
 
     sampler = DistributedSampler(dataset)
     cfg.batch_size_per_gpu = cfg.batch_size // dist.get_world_size()
-    loader = DataLoader(
+    data_loader = DataLoader(
         dataset,
         sampler=sampler,
         batch_size=cfg.batch_size_per_gpu,
         num_workers=cfg.num_workers,
         pin_memory=True,
         drop_last=True,
+        collate_fn=custom_collate,
     )
+    print(f"Data loaded: there are {len(dataset)} images.")
+
+    # ============ building student and teacher networks ... ============
+    if cfg.arch in vits.__dict__.keys():
+        student = vits.__dict__[cfg.arch](
+            img_size=cfg.img_size,
+            patch_size=cfg.patch_size,
+            drop_path_rate=cfg.drop_path_rate,
+        )
+        teacher = vits.__dict__[cfg.arch](img_size=cfg.img_size, patch_size=cfg.patch_size, )
+        embed_dim = student.embed_dim
+    elif cfg.arch in resnet_cifar.__dict__.keys():
+        student = resnet_cifar.__dict__[cfg.arch]()
+        teacher = resnet_cifar.__dict__[cfg.arch]()
+        embed_dim = student.fc.weight.shape[1]
+    elif cfg.arch in resnet_imagenet.__dict__.keys():
+        student = resnet_imagenet.__dict__[cfg.arch]()
+        teacher = resnet_imagenet.__dict__[cfg.arch]()
+        embed_dim = student.fc.weight.shape[1]
+    else:
+        print(f"Unknown architecture: {cfg.arch}")
+        sys.exit(1)
+
+    # multi-crop wrapper handles forward with inputs of different resolutions
+    student = MultiCropWrapper(student, DINOHead(
+        embed_dim,
+        cfg.out_dim,
+        use_bn=cfg.use_bn_in_head,
+        norm_last_layer=cfg.norm_last_layer,
+    ))
+    teacher = MultiCropWrapper(
+        teacher,
+        DINOHead(embed_dim, cfg.out_dim, cfg.use_bn_in_head),
+    )
+    # move networks to gpu
+    student, teacher = student.cuda(), teacher.cuda()
+    # synchronize batch norms (if any)
+    if utils.has_batchnorms(student):
+        student = nn.SyncBatchNorm.convert_sync_batchnorm(student)
+        teacher = nn.SyncBatchNorm.convert_sync_batchnorm(teacher)
+
+        # we need DDP wrapper to have synchro batch norms working...
+        teacher = nn.parallel.DistributedDataParallel(teacher, device_ids=[cfg.gpu])
+        teacher_without_ddp = teacher.module
+    else:
+        # teacher_without_ddp and teacher are the same thing
+        teacher_without_ddp = teacher
+    student = nn.parallel.DistributedDataParallel(student, device_ids=[cfg.gpu])
+    # teacher and student start with the same weights
+    teacher_without_ddp.load_state_dict(student.module.state_dict())
+    # there is no backpropagation through the teacher, so no need for gradients
+    for p in teacher.parameters():
+        p.requires_grad = False
+    print(f"Student and Teacher are built: they are both {cfg.arch} network.")
+
+    # ============ preparing loss ... ============
+    dino_loss = DINOLoss(
+        cfg.out_dim,
+        cfg.local_crops_number + 2,  # total number of crops = 2 global crops + local_crops_number
+        cfg.warmup_teacher_temp,
+        cfg.teacher_temp,
+        cfg.warmup_teacher_temp_epochs,
+        cfg.epochs,
+    ).cuda()
+
+    params_groups = utils.get_params_groups(student)
+    if cfg.optimizer == "adamw":
+        optimizer = torch.optim.AdamW(params_groups)  # to use with ViTs
+    elif cfg.optimizer == "sgd":
+        optimizer = torch.optim.SGD(params_groups, lr=0, momentum=0.9)  # lr is set by scheduler
+    elif cfg.optimizer == "lars":
+        optimizer = optimizers.LARS(params_groups)  # to use with convnet and large batches
+    else:
+        print("Unknown optimizer.")
+        sys.exit(1)
+
+    # for mixed precision training
+    fp16 = torch.cuda.amp.GradScaler() if cfg.fp16 else None
+
+    # ============ init schedulers ... ============
+    lr_schedule = utils.cosine_scheduler(
+        cfg.lr * (cfg.batch_size_per_gpu * dist.get_world_size()) / 256.,  # linear scaling rule
+        cfg.min_lr,
+        cfg.epochs, len(data_loader),
+        warmup_epochs=cfg.warmup_epochs,
+    )
+    wd_schedule = utils.cosine_scheduler(
+        cfg.weight_decay,
+        cfg.weight_decay_end,
+        cfg.epochs, len(data_loader),
+    )
+    # momentum parameter is increased to 1. during training with a cosine schedule
+    momentum_schedule = utils.cosine_scheduler(cfg.momentum_teacher, 1,
+                                               cfg.epochs, len(data_loader))
+    print(f"Loss, optimizer and schedulers ready.")
 
     select_fn = select_crops.names[cfg.select_fn]
 
@@ -97,9 +197,11 @@ def main(cfg):
     utils.restart_from_checkpoint(
         os.path.join(cfg.output_dir, "checkpoint.pth"),
         run_variables=to_restore,
-        model=model,
+        student=student,
+        teacher=teacher,
         optimizer=optimizer,
-        fp16=fp16,
+        fp16_scaler=fp16,
+        dino_loss=dino_loss,
     )
     start_epoch = to_restore["epoch"]
     total_time = to_restore["total_time"]
@@ -108,17 +210,21 @@ def main(cfg):
     board = SummaryWriter(log_dir) if dist.is_main_process() else None
 
     for epoch in range(start_epoch, cfg.epochs):
-        loader.sampler.set_epoch(epoch)
-        adjust_learning_rate(optimizer, init_lr, epoch, cfg)
+        data_loader.sampler.set_epoch(epoch)
 
         start = time.time()
-        train_stats, metrics = train(loader, model, criterion, optimizer, epoch, cfg, fp16, board, select_fn)
+        train_stats, metrics = \
+            train_one_epoch(student, teacher, teacher_without_ddp, dino_loss, data_loader, optimizer,
+                            lr_schedule, wd_schedule, momentum_schedule,
+                            epoch, fp16, cfg, board, select_fn)
         total_time += int(time.time() - start)
 
         save_dict = {
-            "model": model.state_dict(),
-            "optimizer": optimizer.state_dict(),
-            "epoch": epoch + 1,
+            'student': student.state_dict(),
+            'teacher': teacher.state_dict(),
+            'optimizer': optimizer.state_dict(),
+            'epoch': epoch + 1,
+            'dino_loss': dino_loss.state_dict(),
             "fp16": fp16.state_dict() if fp16 is not None else None,
             "total_time": total_time,
         }
@@ -138,110 +244,164 @@ def main(cfg):
     print('Training time {}'.format(total_time_str))
 
 
-def train(loader, model, criterion, optimizer, epoch, cfg, fp16, board, select_fn):
-    model.train()
-    metrics = {
-        "epoch": epoch,
-        "loss": [],
-        "lr": [],
-    }
+def train_one_epoch(student, teacher, teacher_without_ddp, dino_loss, data_loader,
+                    optimizer, lr_schedule, wd_schedule, momentum_schedule, epoch,
+                    fp16, cfg, board, select_fn):
+    metrics = defaultdict(list)
+    metrics["epoch"] = epoch
     metric_logger = utils.MetricLogger(delimiter=" ")
     header = 'Epoch: [{}/{}]'.format(epoch, cfg.epochs)
-    for it, (images, _) in enumerate(metric_logger.log_every(loader, cfg.print_freq, header)):
-        it = len(loader) * epoch + it  # global training iteration
+    for it, (images, params) in enumerate(metric_logger.log_every(data_loader, 10, header)):
+        # update weight decay and learning rate according to their schedule
+        it = len(data_loader) * epoch + it  # global training iteration
+        for i, param_group in enumerate(optimizer.param_groups):
+            param_group["lr"] = lr_schedule[it]
+            if i == 0:  # only the first group is regularized
+                param_group["weight_decay"] = wd_schedule[it]
 
+        # move images to gpu
         images = [im.cuda(non_blocking=True) for im in images]
+        # MinSim
+        images, selected, sample_loss = select_fn(images, student, teacher, dino_loss, fp16, cfg.num_crops, epoch)
 
-        x1, x2 = select_fn(images, model, fp16)
-
+        # teacher and student forward passes + compute dino loss
         with torch.cuda.amp.autocast(fp16 is not None):
-            p1, p2, z1, z2 = model(x1=x1, x2=x2)
-            loss = -(criterion(p1, z2).mean() + criterion(p2, z1).mean()) * 0.5
+            teacher_output = teacher(images[:2])  # only the 2 global views pass through the teacher
+            student_output = student(images)
+            loss = dino_loss(student_output, teacher_output, epoch)
 
+        if not math.isfinite(loss.item()):
+            print("Loss is {}, stopping training".format(loss.item()), force=True)
+            sys.exit(1)
+
+        # student update
         optimizer.zero_grad()
+        param_norms = None
         if fp16 is None:
             loss.backward()
+            if cfg.clip_grad:
+                param_norms = torch.nn.utils.clip_grad_norm_(student.parameters(), cfg.clip_grad)
+            utils.cancel_gradients_last_layer(epoch, student, cfg.freeze_last_layer)
             optimizer.step()
         else:
             fp16.scale(loss).backward()
+            if cfg.clip_grad:
+                fp16.unscale_(optimizer)  # unscale the gradients of optimizer's assigned params in-place
+                param_norms = torch.nn.utils.clip_grad_norm_(student.parameters(), cfg.clip_grad)
+            utils.cancel_gradients_last_layer(epoch, student, cfg.freeze_last_layer)
             fp16.step(optimizer)
             fp16.update()
+
+        # EMA update for the teacher
+        with torch.no_grad():
+            m = momentum_schedule[it]  # momentum parameter
+            for param_q, param_k in zip(student.module.parameters(), teacher_without_ddp.parameters()):
+                param_k.data.mul_(m).add_((1 - m) * param_q.detach().data)
 
         # logging
         torch.cuda.synchronize()
         metric_logger.update(loss=loss.item())
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
+        metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])
 
         metrics["loss"].append(loss.item())
         metrics["lr"].append(optimizer.param_groups[0]["lr"])
+        metrics["param_norms"].append(param_norms.item())
         if cfg.use_adv_metric and it % cfg.adv_metric_freq == 0:
-            # in this branch not implemented yet
-            pass
+            metrics["selected"].append(selected.tolist())
+            metrics["params"].append(params)
+            metrics["sample-loss"].append(sample_loss.tolist())
 
         if dist.is_main_process() and it % cfg.logger_freq == 0:
             board.add_scalar("training loss", loss.item(), it)
             board.add_scalar("training lr", optimizer.param_groups[0]["lr"], it)
+            board.add_scalar("training wd", optimizer.param_groups[0]["weight_decay"], it)
+            board.add_scalar("param_norms", param_norms.item(), it)
 
+    # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}, metrics
 
 
-def adjust_learning_rate(optimizer, init_lr, epoch, args):
-    """Decay the learning rate based on schedule"""
-    cur_lr = init_lr * 0.5 * (1. + math.cos(math.pi * epoch / args.epochs))
-    for param_group in optimizer.param_groups:
-        if 'fix_lr' in param_group and param_group['fix_lr']:
-            param_group['lr'] = init_lr
-        else:
-            param_group['lr'] = cur_lr
-
-
 def get_args_parser():
     p = argparse.ArgumentParser("SimSiam", description='Pytorch Pretraining on ImageNet', add_help=False)
-    p.add_argument('--dataset', type=str, default="ImageNet",
-                   help='Specify dataset (default: ImageNet)')
-    p.add_argument('--data_path', type=str,
-                   help='(root) path to dataset')
+
+    # Model parameters
     p.add_argument('-a', '--arch', type=str,
-                   help="Name of architecture to train (default: resnet50)")
+                   choices=["vit_tiny", "vit_small", "vit_base",
+                            "resnet18", "resnet34", "resnet50", "resnet101", "resnet152",
+                            "resnet18_cifar", "resnet34_cifar", "resnet50_cifar", "resnet101_cifar", "resnet152_cifar"],
+                   help="Name of architecture to train (default: vit_small)")
+    p.add_argument('--img_size', type=int,
+                   help="The standard input size. (default: 224)")
+    p.add_argument('--patch_size', type=int,
+                   help="Size in pixels of input square patches - default 16 (for 16x16 patches).")
+    p.add_argument('--out_dim', type=int,
+                   help="Dimensionality of the DINO head output. (default: 65536)")
+    p.add_argument('--norm_last_layer', type=utils.bool_flag,
+                   help="Whether or not to weight normalize the last layer of the DINO head. (default: True)")
+    p.add_argument('--momentum_teacher', type=float,
+                   help="Base EMA parameter for teacher update. (default: 0.996)")
+    p.add_argument('--use_bn_in_head', type=utils.bool_flag,
+                   help="Whether to use batch normalizations in projection head (default: False)")
+
+    # Temperature teacher parameters
+    p.add_argument('--warmup_teacher_temp', default=0.04, type=float,
+                   help="Initial value for the teacher temperature. (default: 0.04)")
+    p.add_argument('--teacher_temp', type=float,
+                   help="Final value (after linear warmup) of the teacher temperature. (default: 0.04)")
+    p.add_argument('--warmup_teacher_temp_epochs', type=int,
+                   help="Number of warmup epochs for the teacher temperature (default: 0).")
+
+    # Training/Optimization parameters
+    p.add_argument('--fp16', default=True, type=utils.bool_flag,
+                   help="Whether or not to use half precision for training. (default: True)")
+    p.add_argument('--weight_decay', type=float,
+                   help="Initial value of the weight decay. (default: 0.04)")
+    p.add_argument('--weight_decay_end', type=float,
+                   help="Final value of the weight decay. (default: 0.4)")
+    p.add_argument('--clip_grad', type=float,
+                   help="Maximal parameter gradient norm if using gradient clipping. 0 for disabling. (default: 3.0)")
     p.add_argument('--epochs', type=int,
                    help='number of total epochs to run (default: 100)')
     p.add_argument('-b', '--batch_size', type=int,
-                   help='total batch-size (default: 512)')
-    p.add_argument('--lr', type=float,
-                   help='initial (base) learning rate (default: 0.05)')
-    p.add_argument('--momentum', type=float,
-                   help='momentum of SGD solver (default: 0.9)')
-    p.add_argument('--wd', '--weight_decay', dest="weight_decay", type=float,
-                   help='weight decay (default: 1e-4)')
+                   help="total batch-size: (default: 512)")
+    p.add_argument('--freeze_last_layer', type=int,
+                   help="Number of epochs during which we keep the output layer fixed. (default: 1)")
+    p.add_argument("--lr", type=float,
+                   help="Learning rate at the end of linear warmup. (default: 0.0005)")
+    p.add_argument("--warmup_epochs", type=int,
+                   help="Number of epochs for the linear learning-rate warm up. (default: 10)")
+    p.add_argument('--min_lr', type=float,
+                   help="Target LR at the end of optimization. (default: 1e-6)")
+    p.add_argument('--optimizer', type=str, choices=['adamw', 'sgd', 'lars'],
+                   help="Type of optimizer. (default: adamw)")
+    p.add_argument('--drop_path_rate', type=float,
+                   help="stochastic depth rate. (default: 0.1)")
 
-    # simsiam specific parameters:
-    p.add_argument('--dim', type=int,
-                   help='feature dimension (default: 2048)')
-    p.add_argument('--pred_dim', type=int,
-                   help='hidden dimension of the predictor (default: 512)')
-    p.add_argument('--fix_pred_lr', type=utils.bool_flag,
-                   help='Fix learning rate for the predictor (default: True)')
-
-    # data augmentation parameters:
-    p.add_argument("--crop_size", type=int,
-                   help="Size of crops (default: 224)")
-    p.add_argument("--crop_scale", type=float, nargs='+',
-                   help="Scale range of the crops, relative to original image (default: 0.2 1.)")
-    p.add_argument("--blur_prob", type=float,
-                   help="Blur probability (default: 0.5)")
-    p.add_argument("--hflip_prob", type=float,
-                   help="Horizontal-Flip probability (default: 0.5)")
+    # Multi-crop/Data-Augmentation parameters
+    p.add_argument('--global_crops_scale', type=float, nargs='+',
+                   help="Scale range of the cropped image before resizing, w.r.t. the original image. (default: 0.4 1)")
+    p.add_argument('--local_crops_number', type=int,
+                   help="Number of small local views to generate. Value 0 disables multi-crop training. (default: 8)")
+    p.add_argument('--local_crops_scale', type=float, nargs='+',
+                   help="Scale range of the cropped image before resizing. (default: 0.05 0.4)")
+    p.add_argument("--global_crops_size", type=int,
+                   help="Size of global crops (default: 224)")
+    p.add_argument("--local_crops_size", type=int,
+                   help="Size of local crops (default: 96)")
 
     # MinSim parameters:
     p.add_argument("--num_crops", default=4, type=int, help="Number of crops")
     p.add_argument("--select_fn", default="cross", type=str, choices=select_crops.names)
 
     # Misc
-    p.add_argument('--fp16', default=True, type=utils.bool_flag,
-                   help="Whether or not to use half precision for training. (default: True)")
-    p.add_argument('--output_dir', type=str,
+    p.add_argument('--dataset', type=str, default="ImageNet",
+                   help='Specify dataset (default: ImageNet)')
+    p.add_argument('--data_path', type=str,
+                   help='(root) path to dataset')
+    p.add_argument('--output_dir', type=str, default='.',
                    help='Path to save logs and checkpoints.')
     p.add_argument('--saveckp_freq', default=0, type=int,
                    help='Save checkpoint every x epochs.')

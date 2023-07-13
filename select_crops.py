@@ -3,32 +3,34 @@ import torch.nn.functional as nnf
 
 
 @torch.no_grad()
-def select_crops_cross(images, model, fp16):
+def select_crops_cross(images, student, teacher, criterion, fp16, num_crops, epoch):
     b, c, h, w = images[0].shape
     device = images[0].device
 
+    globe = images[:num_crops]
+    local = images[num_crops:]
     with torch.cuda.amp.autocast(fp16 is not None):
-        model_out = model.module.single_forward(torch.cat(images, dim=0))
-    p1s, z1s = model_out[0].chunk(len(images)), model_out[1].chunk(len(images))
+        teacher_output = teacher(globe)
+        student_output = student(globe)
+    student_output, teacher_output = student_output.chunk(num_crops), teacher_output.chunk(num_crops)
 
     out1 = torch.zeros_like(images[0])
     out2 = torch.zeros_like(images[0])
     score = torch.full([b], torch.inf, device=device)
+    selected = torch.zeros((2, b), dtype=torch.uint8)
 
-    for n in range(len(images)):
-        p1, z1 = p1s[n], z1s[n]
-        for m in range(n + 1, len(images)):
-            p2, z2 = p1s[m], z1s[m]
-
+    for n, s in enumerate(student_output):
+        for m, t in enumerate(teacher_output[n+1:], n+1):
             with torch.cuda.amp.autocast(fp16 is not None):
-                sim = nnf.cosine_similarity(p1, z2) + nnf.cosine_similarity(p2, z1)
-                score, indices = torch.stack((score, sim)).min(dim=0)
+                sim = criterion.select_forward(s, t, epoch)
+                score, indices = torch.stack((score, sim)).max(dim=0)
                 indices = indices.type(torch.bool)
-
+            selected[0][indices] = n
+            selected[1][indices] = m
             out1 = torch.where(indices[:, None, None, None], images[n], out1)
             out2 = torch.where(indices[:, None, None, None], images[m], out2)
 
-    return out1, out2
+    return [out1, out2] + local, selected, score
 
 
 @torch.no_grad()

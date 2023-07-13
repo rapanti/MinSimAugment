@@ -1,7 +1,7 @@
 import argparse
 import json
-import math
 import os
+import sys
 from pathlib import Path
 
 import torch
@@ -19,6 +19,10 @@ import distributed as dist
 import optimizers
 import utils
 
+import resnet_cifar
+import resnet_imagenet
+import vision_transformer as vits
+
 
 def main(cfg):
     dist.init_distributed_mode(cfg) if not dist.is_enabled() else None
@@ -26,11 +30,6 @@ def main(cfg):
 
     print("git:\n  {}\n".format(utils.get_sha()))
     print(OmegaConf.to_yaml(cfg))
-
-    if cfg.dataset == "CIFAR10":
-        import resnet_cifar as models
-    else:
-        import resnet_imagenet as models
 
     # prepare data
     if cfg.dataset == "CIFAR10":
@@ -75,9 +74,22 @@ def main(cfg):
 
     # create model
     print("=> creating model '{}'".format(cfg.arch))
-    model = models.__dict__[cfg.arch](
-        num_classes=cfg.num_labels
-    ).cuda()
+    if cfg.arch in vits.__dict__.keys():
+        model = vits.__dict__[cfg.arch](
+            img_size=cfg.img_size,
+            patch_size=cfg.patch_size,
+            num_classes=0,
+        )
+        embed_dim = model.embed_dim * (cfg.n_last_blocks + int(cfg.avgpool))
+        model.fc = nn.Linear(embed_dim, cfg.num_labels)
+    elif cfg.arch in resnet_cifar.__dict__.keys():
+        model = resnet_cifar.__dict__[cfg.arch](num_classes=cfg.num_labels)
+    elif cfg.arch in resnet_imagenet.__dict__.keys():
+        model = resnet_imagenet.__dict__[cfg.arch](num_classes=cfg.num_labels)
+    else:
+        print(f"Unknown architecture: {cfg.arch}")
+        sys.exit(1)
+    model.cuda()
 
     # freeze all layers but the last fc
     for name, param in model.named_parameters():
@@ -86,6 +98,7 @@ def main(cfg):
     # init the fc layer
     model.fc.weight.data.normal_(mean=0.0, std=0.01)
     model.fc.bias.data.zero_()
+
     # optimize only the linear classifier
     parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
     assert len(parameters) == 2  # fc.weight, fc.bias
@@ -97,7 +110,7 @@ def main(cfg):
     # define loss function (criterion) and optimizer
     criterion = nn.CrossEntropyLoss().cuda()
 
-    # infer learning rate before changing batch size
+    # infer learning rate
     init_lr = cfg.lr * cfg.batch_size / 256
     if cfg.lars:
         optimizer = optimizers.LARS(parameters, init_lr,
@@ -107,6 +120,7 @@ def main(cfg):
         optimizer = torch.optim.SGD(parameters, init_lr,
                                     momentum=cfg.momentum,
                                     weight_decay=cfg.weight_decay)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, cfg.epochs, eta_min=0)
 
     log_dir = os.path.join(cfg.output_dir, "tensorboard")
     board = SummaryWriter(log_dir) if dist.is_main_process() else None
@@ -124,15 +138,16 @@ def main(cfg):
 
     for epoch in range(start_epoch, cfg.epochs):
         sampler.set_epoch(epoch)
-        adjust_learning_rate(optimizer, init_lr, epoch, cfg)
 
         # train for one epoch
         train_stats = train(train_loader, model, criterion, optimizer, epoch, cfg, board)
         log_stats = {**{f'train_{k}': v for k, v in train_stats.items()}, 'epoch': epoch}
 
+        scheduler.step()
+
         # evaluate on validation set
         if epoch % cfg.val_freq == 0 or epoch == cfg.epochs - 1:
-            test_stats = validate(val_loader, model, criterion)
+            test_stats = validate(val_loader, model, criterion, cfg)
             print(f"Accuracy at epoch {epoch} of the network on the {len(val_data)} test images: "
                   f"{test_stats['acc1']:.1f}%")
             # remember best acc@1 and save checkpoint
@@ -172,7 +187,16 @@ def train(loader, model, criterion, optimizer, epoch, cfg, board):
         targets = targets.cuda(non_blocking=True)
 
         # compute output
-        output = model(images)
+        if "vit" in cfg.arch:
+            intermediate_output = model.module.get_intermediate_layers(images, cfg.n_last_blocks)
+            output = torch.cat([x[:, 0] for x in intermediate_output], dim=-1)
+            if cfg.avgpool:
+                output = torch.cat(
+                    (output.unsqueeze(-1), torch.mean(intermediate_output[-1][:, 1:], dim=1).unsqueeze(-1)), dim=-1)
+                output = output.reshape(output.shape[0], -1)
+            output = model.module.fc(output)
+        else:
+            output = model(images)
         loss = criterion(output, targets)
 
         # compute gradient and do SGD step
@@ -193,13 +217,14 @@ def train(loader, model, criterion, optimizer, epoch, cfg, board):
         if dist.is_main_process() and it % cfg.logger_freq:
             board.add_scalar(tag="eval acc1", scalar_value=acc1, global_step=it)
             board.add_scalar(tag="eval loss", scalar_value=loss.item(), global_step=it)
+            board.add_scalar(tag="eval lr", scalar_value=optimizer.param_groups[0]["lr"], global_step=it)
 
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 
-def validate(loader, model, criterion):
+def validate(loader, model, criterion, cfg):
     # switch to evaluate mode
     model.eval()
 
@@ -211,7 +236,16 @@ def validate(loader, model, criterion):
             target = target.cuda(non_blocking=True)
 
             # compute output
-            output = model(images)
+            if "vit" in cfg.arch:
+                intermediate_output = model.module.get_intermediate_layers(images, cfg.n_last_blocks)
+                output = torch.cat([x[:, 0] for x in intermediate_output], dim=-1)
+                if cfg.avgpool:
+                    output = torch.cat(
+                        (output.unsqueeze(-1), torch.mean(intermediate_output[-1][:, 1:], dim=1).unsqueeze(-1)), dim=-1)
+                    output = output.reshape(output.shape[0], -1)
+                output = model.module.fc(output)
+            else:
+                output = model(images)
             loss = criterion(output, target)
 
             # measure accuracy and record loss
@@ -229,13 +263,6 @@ def validate(loader, model, criterion):
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 
-def adjust_learning_rate(optimizer, init_lr, epoch, args):
-    """Decay the learning rate based on schedule"""
-    cur_lr = init_lr * 0.5 * (1. + math.cos(math.pi * epoch / args.epochs))
-    for param_group in optimizer.param_groups:
-        param_group['lr'] = cur_lr
-
-
 def get_args_parser():
     p = argparse.ArgumentParser(description='PyTorch Eval-Linear ImageNet', add_help=False)
     p.add_argument('--dataset', default="ImageNet", type=str,
@@ -243,6 +270,8 @@ def get_args_parser():
     p.add_argument('--data_path', type=str,
                    help='(root) path to dataset')
     p.add_argument('-a', '--arch', type=str,
+                   help="Name of architecture to train (default: vit_small)")
+    p.add_argument('--img_size', type=int,
                    help="Name of architecture to train (default: resnet50)")
     p.add_argument('--epochs', type=int,
                    help='number of total epochs to run (default: 90)')
