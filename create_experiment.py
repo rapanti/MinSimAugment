@@ -2,7 +2,9 @@ import argparse
 from pathlib import Path
 import subprocess
 import sys
+import getpass
 
+from utils import find_free_port
 from omegaconf import OmegaConf
 
 from pretrain import get_args_parser as pretrain_get_args_parser
@@ -13,7 +15,7 @@ if __name__ == "__main__":
     slurm_parser = argparse.ArgumentParser("SlurmParser")
     slurm_parser.add_argument("--gpus", default=1, type=int,
                               help="Number of GPUs to use")
-    slurm_parser.add_argument("--partition", default="mlhiwidlc_gpu-rtx2080-advanced", type=str,
+    slurm_parser.add_argument("--partition", default="ml_gpu-rtxA6000", type=str,
                               help="The name of the compute partition to use")
     slurm_parser.add_argument("--array", default=0, type=int,
                               help="If n > 0 submits a job array n+1 jobs")
@@ -24,6 +26,10 @@ if __name__ == "__main__":
 
     pretrain_parser = pretrain_get_args_parser()
     eval_linear_parser = eval_linear_get_args_parser()
+
+    current_username = getpass.getuser()
+    conda_env_name = "torch" if current_username == "rapanti" else "minsim2"
+    profile_path = "~/.source" if current_username == "rapanti" else "/home/ferreira/.profile"
 
     if len(sys.argv) > 1:
         slurm_args, rest = slurm_parser.parse_known_args()
@@ -88,12 +94,19 @@ if __name__ == "__main__":
                     eval_linear_args[arg] = value
             break
 
-    exp_dir = "/work/dlclarge2/rapanti-MinSimAugment/experiments" \
-        if slurm_args.exp_dir is None else slurm_args.exp_dir
+    if current_username == "rapanti":
+        exp_dir = "/work/dlclarge2/rapanti-MinSimAugment/experiments" \
+            if slurm_args.exp_dir is None else slurm_args.exp_dir
+    else:
+        exp_dir = "/work/dlclarge1/ferreira-simsiam/minsim_experiments" \
+            if slurm_args.exp_dir is None else slurm_args.exp_dir
 
     if args.data_path is None:
         if args.dataset == "CIFAR10":
-            args.data_path = "/work/dlclarge2/rapanti-MinSimAugment/datasets/CIFAR10"
+            if current_username == "rapanti":
+                args.data_path = "/work/dlclarge2/rapanti-MinSimAugment/datasets/CIFAR10"
+            else:
+                args.data_path = "/work/dlclarge1/ferreira-simsiam/simsiam/datasets/CIFAR10"
         elif args.dataset == "ImageNet":
             args.data_path = "/data/datasets/ImageNet/imagenet-pytorch"
         else:
@@ -115,6 +128,13 @@ if __name__ == "__main__":
         output_dir.mkdir(parents=True, exist_ok=True)
         args.output_dir = str(output_dir)
         eval_linear_args.output_dir = str(output_dir)
+
+        # Define master port (for preventing 'Address already in use error' when submitting more than 1 jobs on 1 node)
+        master_port = find_free_port()
+        args.dist_url = "tcp://localhost:" + str(master_port)
+        eval_linear_args.dist_url = args.dist_url
+
+        print(f"using {args.dist_url=}")
         print(f"Experiment: {output_dir}")
 
         with open(output_dir.joinpath("pretrain.yaml"), mode="w", encoding="utf-8") as file:
@@ -141,13 +161,17 @@ if __name__ == "__main__":
             'echo "Workingdir: $PWD"',
             'echo "Started at $(date)"',
             'echo "Running job $SLURM_JOB_NAME with given JID $SLURM_JOB_ID on queue $SLURM_JOB_PARTITION"\n',
-            "source ~/.profile",
-            "conda activate torch"
+            f"source {profile_path}",
+            f"conda activate {conda_env_name}"
         ]
         run = [
             "torchrun",
             f"--nproc_per_node={slurm_args.gpus}",
-            f"--nnodes=1", f"--standalone",
+            f"--nnodes=1",
+            # rdzv assigns ports automatically to workers when port=0, however DDP uses its own 'master_port'
+            f"--rdzv-endpoint=localhost:0",
+            f"--rdzv-backend=c10d",
+            f"--rdzv-id=$SLURM_JOB_ID",
             f"code/run_pipeline.py"
         ]
 
