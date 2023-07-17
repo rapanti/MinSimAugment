@@ -19,11 +19,11 @@ lr: 0.0005
 min_lr: 1.0e-06
 momentum_teacher: 0.996
 norm_last_layer: true
-num_crops: 4
+num_crops: 2
 optimizer: adamw
 out_dim: 4096
 patch_size: 4
-select_fn: cross
+select_fn: identity
 teacher_temp: 0.04
 weight_decay: 0.04
 use_bn_in_head: false

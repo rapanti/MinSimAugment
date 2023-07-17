@@ -2,6 +2,10 @@ import torch
 import torch.nn.functional as nnf
 
 
+def select_crops_identity(images, student, teacher, criterion, fp16, num_crops, epoch):
+    return images, torch.empty(1), torch.empty(1)
+
+
 @torch.no_grad()
 def select_crops_cross(images, student, teacher, criterion, fp16, num_crops, epoch):
     b, c, h, w = images[0].shape
@@ -16,13 +20,13 @@ def select_crops_cross(images, student, teacher, criterion, fp16, num_crops, epo
 
     out1 = torch.zeros_like(images[0])
     out2 = torch.zeros_like(images[0])
-    score = torch.full([b], torch.inf, device=device)
+    score = torch.full([b], 0, device=device)
     selected = torch.zeros((2, b), dtype=torch.uint8)
 
     for n, s in enumerate(student_output):
         for m, t in enumerate(teacher_output[n+1:], n+1):
             with torch.cuda.amp.autocast(fp16 is not None):
-                sim = criterion.select_forward(s, t, epoch)
+                sim = criterion.select_forward(s, t, epoch)  # sample-loss
                 score, indices = torch.stack((score, sim)).max(dim=0)
                 indices = indices.type(torch.bool)
             selected[0][indices] = n
@@ -171,4 +175,5 @@ names = {
     "firstlayer": select_crops_first_layer,
     "secondlayer": select_crops_second_layer,
     "avgpool": select_crops_avgpool,
+    "identity": select_crops_identity,
 }
