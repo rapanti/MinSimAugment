@@ -3,7 +3,7 @@ import torch.nn.functional as nnf
 
 
 def select_crops_identity(images, student, teacher, criterion, fp16, num_crops, epoch):
-    return images, torch.empty(1), torch.empty(1)
+    return images, torch.zeros(1), torch.zeros(1)
 
 
 @torch.no_grad()

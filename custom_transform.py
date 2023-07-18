@@ -75,11 +75,11 @@ class TransformParams(object):
 
         # RandomApply-GaussianBlur
         if torch.rand(1) < self.blur_prob:
-            params.append(False)
-        else:
             sigma = self.blur.get_params(self.blur.sigma[0], self.blur.sigma[1])
             img = F.gaussian_blur(img, self.blur.kernel_size, [sigma, sigma])
             params.append(sigma)
+        else:
+            params.append(False)
 
         # RandomSolarize
         if torch.rand(1) < self.solarize_prob:
