@@ -16,7 +16,8 @@ class TransformParams(object):
     def __init__(self,
                  crop_size: int = 224,
                  crop_scale: Tuple[float, float] = (0.2, 1.0),
-                 interpolation: InterpolationMode = InterpolationMode.BILINEAR,
+                 interpolation: InterpolationMode = InterpolationMode.BICUBIC,
+                 colorj_prob: float = 0.8,
                  blur_prob: float = 0.5,
                  hflip_prob: float = 0.5,
                  solarize_prob: float = 0.2,
@@ -24,7 +25,8 @@ class TransformParams(object):
                  std: Sequence[float] = IMAGENET_DEFAULT_STD,
                  ):
         self.rrc = RandomResizedCrop(crop_size, scale=crop_scale, interpolation=interpolation)
-        self.color_jitter = ColorJitter(0.4, 0.4, 0.4, 0.1)
+        self.colorj_prob = colorj_prob
+        self.color_jitter = ColorJitter(0.4, 0.4, 0.2, 0.1)
         self.gray_prob = 0.2
         self.blur = GaussianBlur(9, (0.1, 2.0))
         self.blur_prob = blur_prob
@@ -48,7 +50,7 @@ class TransformParams(object):
             params.append(False)
 
         # RandomApply-ColorJitter
-        if torch.rand(1) < 0.8:
+        if torch.rand(1) < self.colorj_prob:
             fn_idx, brightness_factor, contrast_factor, saturation_factor, hue_factor = \
                 self.color_jitter.get_params(self.color_jitter.brightness, self.color_jitter.contrast,
                                              self.color_jitter.saturation, self.color_jitter.hue)
