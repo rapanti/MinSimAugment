@@ -5,6 +5,7 @@ from matplotlib import colors
 from matplotlib.ticker import PercentFormatter
 
 NUM_BINS = 20
+NUM_CROPS = 4
 
 
 def get_dims(x):
@@ -45,7 +46,7 @@ def iou_un_select_one_epoch(epoch_metrics):
     for i, iteration in enumerate(params_epoch):
         selected = np.array(selected_epoch[i])
         for c in range(len(iteration[0])):
-            params = [item[c][0] for item in iteration]
+            params = [item[c][0] for item in iteration[:NUM_CROPS]]
             ss = selected[:, c]
             for n, x1 in enumerate(params):
                 for m, x2 in enumerate(params[n + 1:], n + 1):
@@ -69,7 +70,7 @@ def avg_least_typ_selected_one_epoch(epoch_metrics, typ):
     for i, iteration in enumerate(params_epoch):
         selected = np.array(selected_epoch[i])
         for c in range(len(iteration[0])):
-            params = [item[c][0] for item in iteration]
+            params = [item[c][0] for item in iteration[:NUM_CROPS]]
             ss = selected[:, c]
             min_overlap = np.inf
             indices = [0, 0]
@@ -93,7 +94,7 @@ def normed_overlap_un_select_one_epoch(epoch_metrics):
     for i, iteration in enumerate(params_epoch):
         selected = np.array(selected_epoch[i])
         for c in range(len(iteration[0])):
-            params = [item[c][0] for item in iteration]
+            params = [item[c][0] for item in iteration[:NUM_CROPS]]
             ss = selected[:, c]
             for n, x1 in enumerate(params):
                 for m, x2 in enumerate(params[n + 1:], n + 1):
@@ -145,9 +146,9 @@ def save_all_hists(metrics, typ="norm"):
 
 
 if __name__ == "__main__":
-    data_path = "../../exp_data/metrics.json"
+    data_path = "../../exp_data/metrics0_dino.json"
     with open(data_path, "r") as file:
         metrics = list(map(json.loads, file.readlines()))
 
-    # save_all_hists(metrics, "norm")
-    save_plot_avg_select_least_typ(metrics, "overlap")
+    # save_all_hists(metrics, "iou")
+    save_plot_avg_select_least_typ(metrics, "iou")
