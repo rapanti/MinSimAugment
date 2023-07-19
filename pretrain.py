@@ -235,8 +235,8 @@ def get_args_parser():
                    help="Horizontal-Flip probability (default: 0.5)")
 
     # MinSim parameters:
-    p.add_argument("--num_crops", default=4, type=int, help="Number of crops")
-    p.add_argument("--select_fn", default="cross", type=str, choices=select_crops.names)
+    p.add_argument("--num_crops", default=2, type=int, help="Number of crops")
+    p.add_argument("--select_fn", default="no_minsim", type=str, choices=select_crops.names)
 
     # Misc
     p.add_argument('--fp16', default=True, type=utils.bool_flag,

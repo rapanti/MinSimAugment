@@ -3,6 +3,12 @@ import torch.nn.functional as nnf
 
 
 @torch.no_grad()
+def identity(images, model, fp16):
+    assert len(images) == 2, "if 'no_minsim' is used as selection function, set num_crops=2"
+    return images[0], images[1]
+
+
+@torch.no_grad()
 def select_crops_cross(images, model, fp16):
     b, c, h, w = images[0].shape
     device = images[0].device
@@ -169,4 +175,5 @@ names = {
     "firstlayer": select_crops_first_layer,
     "secondlayer": select_crops_second_layer,
     "avgpool": select_crops_avgpool,
+    "no_minsim": select_crops_identity,
 }
