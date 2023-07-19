@@ -175,5 +175,5 @@ names = {
     "firstlayer": select_crops_first_layer,
     "secondlayer": select_crops_second_layer,
     "avgpool": select_crops_avgpool,
-    "no_minsim": select_crops_identity,
+    "no_minsim": identity,
 }
