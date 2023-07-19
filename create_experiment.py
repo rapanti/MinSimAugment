@@ -94,14 +94,19 @@ if __name__ == "__main__":
                     eval_linear_args[arg] = value
             break
 
-    exp_dir = "/work/dlclarge2/rapanti-MinSimAugment/experiments" \
-        if slurm_args.exp_dir is None else slurm_args.exp_dir
+    if current_username == "rapanti":
+        exp_dir = "/work/dlclarge2/rapanti-MinSimAugment/experiments" \
+            if slurm_args.exp_dir is None else slurm_args.exp_dir
+    else:
+        exp_dir = "/work/dlclarge1/ferreira-simsiam/minsim_experiments" \
+            if slurm_args.exp_dir is None else slurm_args.exp_dir
 
     if args.data_path is None:
         if args.dataset == "CIFAR10":
-            args.data_path = "/work/dlclarge2/rapanti-MinSimAugment/datasets/CIFAR10"
-        elif args.dataset == "ImageNet":
-            args.data_path = "/data/datasets/ImageNet/imagenet-pytorch"
+            if current_username == "rapanti":
+                args.data_path = "/work/dlclarge2/rapanti-MinSimAugment/datasets/CIFAR10"
+            else:
+                args.data_path = "/work/dlclarge1/ferreira-simsiam/simsiam/datasets/CIFAR10"
         else:
             raise ValueError(f"Dataset '{args.dataset}' has no default path. Specify path to dataset.")
 
