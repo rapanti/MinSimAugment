@@ -107,6 +107,8 @@ if __name__ == "__main__":
                 args.data_path = "/work/dlclarge2/rapanti-MinSimAugment/datasets/CIFAR10"
             else:
                 args.data_path = "/work/dlclarge1/ferreira-simsiam/simsiam/datasets/CIFAR10"
+        elif args.dataset == "ImageNet":
+            args.data_path = "/data/datasets/ImageNet/imagenet-pytorch"
         else:
             raise ValueError(f"Dataset '{args.dataset}' has no default path. Specify path to dataset.")
 
