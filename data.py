@@ -53,7 +53,7 @@ def make_pretrain_transform(
 ):
     transforms_list = [
         RandomResizedCrop(crop_size, scale=crop_scale, interpolation=interpolation),
-        RandomApply([ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8),
+        RandomApply([ColorJitter(0.4, 0.4, 0.2, 0.1)], p=0.8),
         RandomGrayscale(p=0.2),
     ]
     if blur_prob > 0.0:
