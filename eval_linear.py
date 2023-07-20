@@ -2,6 +2,7 @@ import argparse
 import json
 import math
 import os
+import sys
 from pathlib import Path
 
 import torch
@@ -19,6 +20,9 @@ import distributed as dist
 import optimizers
 import utils
 
+import resnet_cifar
+import resnet_imagenet
+
 
 def main(cfg):
     dist.init_distributed_mode(cfg) if not dist.is_enabled() else None
@@ -26,11 +30,6 @@ def main(cfg):
 
     print("git:\n  {}\n".format(utils.get_sha()))
     print(OmegaConf.to_yaml(cfg))
-
-    if cfg.dataset == "CIFAR10":
-        import resnet_cifar as models
-    else:
-        import resnet_imagenet as models
 
     # prepare data
     if cfg.dataset == "CIFAR10":
@@ -75,7 +74,15 @@ def main(cfg):
 
     # create model
     print("=> creating model '{}'".format(cfg.arch))
-    model = models.__dict__[cfg.arch](
+    if cfg.arch in resnet_cifar.__dict__.keys():
+        arch = resnet_cifar.__dict__[cfg.arch]
+    elif cfg.arch in resnet_imagenet.__dict__.keys():
+        arch = resnet_imagenet.__dict__[cfg.arch]
+    else:
+        print(f"Unknown architecture: {cfg.arch}")
+        sys.exit(1)
+
+    model = arch.__dict__[cfg.arch](
         num_classes=cfg.num_labels
     ).cuda()
 

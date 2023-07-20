@@ -15,7 +15,8 @@ momentum: 0.9
 pred_dim: 512
 weight_decay: 0.0001
 # MinSim parameters
-select_fn: cross
+select_fn: identity
+num_crops: 2
 # Misc parameters
 data_path: null
 output_dir: null

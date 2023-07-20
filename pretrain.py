@@ -2,6 +2,7 @@ import argparse
 import json
 import math
 import os
+import sys
 import time
 import datetime
 from pathlib import Path
@@ -23,6 +24,9 @@ import select_crops
 import custom_transform
 import utils
 
+import resnet_cifar
+import resnet_imagenet
+
 
 def custom_collate(batch):
     bs = len(batch[0][0][0])
@@ -40,15 +44,18 @@ def main(cfg):
     print(f"git:\n  {utils.get_sha()}\n")
     print(OmegaConf.to_yaml(cfg))
 
-    if cfg.dataset == "CIFAR10":
-        import resnet_cifar as models
+    if cfg.arch in resnet_cifar.__dict__.keys():
+        arch = resnet_cifar.__dict__[cfg.arch]
         proj_layer = 2
-    else:
-        import resnet_imagenet as models
+    elif cfg.arch in resnet_imagenet.__dict__.keys():
+        arch = resnet_imagenet.__dict__[cfg.arch]
         proj_layer = 3
+    else:
+        print(f"Unknown architecture: {cfg.arch}")
+        sys.exit(1)
 
     model = builder.SimSiam(
-        models.__dict__[cfg.arch],
+        arch,
         cfg.dim, cfg.pred_dim,
         proj_layer,
     ).cuda()
@@ -249,8 +256,8 @@ def get_args_parser():
                    help="Horizontal-Flip probability (default: 0.5)")
 
     # MinSim parameters:
-    p.add_argument("--num_crops", default=4, type=int, help="Number of crops")
-    p.add_argument("--select_fn", default="cross", type=str, choices=select_crops.names)
+    p.add_argument("--num_crops", default=2, type=int, help="Number of crops")
+    p.add_argument("--select_fn", default="identity", type=str, choices=select_crops.names)
 
     # Misc
     p.add_argument('--fp16', default=True, type=utils.bool_flag,

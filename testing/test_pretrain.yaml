@@ -1,4 +1,4 @@
-arch: resnet18
+arch: resnet18_cifar
 batch_size: 128
 blur_prob: 0.0
 crop_scale:
@@ -14,10 +14,10 @@ lr: 0.06
 momentum: 0.9
 pred_dim: 512
 weight_decay: 0.0005
-select_fn: cross
+select_fn: identity
 data_path: ../datasets/CIFAR10  # /data/datasets/ImageNet/imagenet-pytorch
 output_dir: exp
-num_crops: 4
+num_crops: 2
 fp16: true
 saveckp_freq: 0
 seed: 42

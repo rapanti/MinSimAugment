@@ -3,6 +3,11 @@ import torch.nn.functional as nnf
 
 
 @torch.no_grad()
+def select_crops_identity(images, model, fp16):
+    return images[0], images[1], torch.zeros(1), torch.zeros(1)
+
+
+@torch.no_grad()
 def select_crops_cross(images, model, fp16):
     b, c, h, w = images[0].shape
     device = images[0].device
@@ -171,4 +176,5 @@ names = {
     "firstlayer": select_crops_first_layer,
     "secondlayer": select_crops_second_layer,
     "avgpool": select_crops_avgpool,
+    "identity": select_crops_identity,
 }
