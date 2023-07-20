@@ -75,9 +75,9 @@ if __name__ == "__main__":
         data_path = f"../../exp_data/metrics{seed}.json"
         metrics = read_file(data_path)
 
-        path = "plots/relative-distance-of-centerpoints"
-        file_name = f"simsiam_default_seed{seed}.png"  # name.png
         exp_name = f"simsiam-minsim-collect_metrics-resnet50-ImageNet-ep100-bs256-select_cross-ncrops4-lr0.05-wd0.0001-mom0.9-seed{seed}"
+        path = f"plots/{exp_name}/relative-distance-of-centerpoints"
+        file_name = f"distance_seed{seed}.png"  # name.png
 
         data, std = get_relative_distance(metrics)
         # data, std = get_relative_distance_vs_random(metrics)

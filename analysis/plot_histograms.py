@@ -85,9 +85,9 @@ if __name__ == "__main__":
         data_path = f"../../exp_data/metrics{seed}.json"
         metrics = read_file(data_path)
 
-        typ = "overlap"  # "iou" "overlap" "iou-vs-rand"
-        path = f"plots/histograms-{typ}/simsiam_default_seed{seed}"
+        typ = "iou"  # "iou" "overlap" "iou-vs-rand"
         exp_name = f"simsiam-minsim-collect_metrics-resnet50-ImageNet-ep100-bs256-select_cross-ncrops4-lr0.05-wd0.0001-mom0.9-seed{seed}"
+        path = f"plots/{exp_name}/histograms-{typ}"
 
         title = f"{typ} of Selected vs Not-Selected"  # "IoU of Selected vs Not-Selected (Random)"
         xlabel = f"{typ}"
