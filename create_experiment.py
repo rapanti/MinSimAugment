@@ -15,13 +15,13 @@ if __name__ == "__main__":
     slurm_parser = argparse.ArgumentParser("SlurmParser")
     slurm_parser.add_argument("--gpus", default=1, type=int,
                               help="Number of GPUs to use")
-    slurm_parser.add_argument("--partition", default="alldlc_gpu-rtx2080", type=str,
+    slurm_parser.add_argument("--partition", default=None, type=str,
                               help="The name of the compute partition to use")
     slurm_parser.add_argument("--array", default=0, type=int,
                               help="If n > 0 submits a job array n+1 jobs")
     slurm_parser.add_argument("--time", default="23:59:59", type=str)
-    slurm_parser.add_argument("--head", default="simsiam-minsim", type=str)
-    slurm_parser.add_argument("--descr", default="collect_metrics", type=str)
+    slurm_parser.add_argument("--head", default="simsiam-msatransform", type=str)
+    slurm_parser.add_argument("--descr", default="baseline", type=str)
     slurm_parser.add_argument("--exp_dir", default=None, type=str)
 
     pretrain_parser = pretrain_get_args_parser()
@@ -94,13 +94,11 @@ if __name__ == "__main__":
                     eval_linear_args[arg] = value
             break
 
-    if current_username == "rapanti":
-        exp_dir = "/work/dlclarge2/rapanti-MinSimAugment/experiments" \
-            if slurm_args.exp_dir is None else slurm_args.exp_dir
-        slurm_args.partition = "mlhiwidlc_gpu-rtx2080-advanced"
-    else:
-        exp_dir = "/work/dlclarge1/ferreira-simsiam/minsim_experiments" \
-            if slurm_args.exp_dir is None else slurm_args.exp_dir
+    if slurm_args.exp_dir is None:
+        if current_username == "rapanti":
+            exp_dir = "/work/dlclarge2/rapanti-MinSimAugment/experiments"
+        else:
+            exp_dir = "/work/dlclarge1/ferreira-simsiam/minsim_experiments" \
 
     if args.data_path is None:
         if args.dataset == "CIFAR10":
@@ -113,6 +111,12 @@ if __name__ == "__main__":
         else:
             raise ValueError(f"Dataset '{args.dataset}' has no default path. Specify path to dataset.")
 
+    if slurm_args.partition is None:
+        if current_username == "rapanti":
+            slurm_args.partition = "mlhiwidlc_gpu-rtx2080-advanced"
+        else:
+            slurm_args.partition = "alldlc_gpu-rtx2080"
+
     # make sure that these arguments are the same
     eval_linear_args.arch = args.arch
     eval_linear_args.dataset = args.dataset
@@ -122,7 +126,7 @@ if __name__ == "__main__":
         args.seed = seed
         exp_name = f"{slurm_args.head}-{slurm_args.descr}" \
                    f"-{args.arch}-{args.dataset}-ep{args.epochs}-bs{args.batch_size}" \
-                   f"-select_{args.select_fn}-ncrops{args.num_crops}" \
+                   f"-start{args.start_val}-end{args.end_val}" \
                    f"-lr{args.lr}-wd{args.weight_decay}-mom{args.momentum}-seed{args.seed}"
         output_dir = Path(exp_dir).joinpath(exp_name)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -150,7 +154,8 @@ if __name__ == "__main__":
 
         slurm_file = slurm_dir.joinpath("%A.%a.%N.txt")
         sbatch = [
-            "#!/bin/bash", f"#SBATCH -p {slurm_args.partition}",
+            "#!/bin/bash",
+            f"#SBATCH -p {slurm_args.partition}",
             f"#SBATCH -t {slurm_args.time}",
             f"#SBATCH --gres=gpu:{slurm_args.gpus}",
             f"#SBATCH -J {exp_name}",
@@ -161,7 +166,7 @@ if __name__ == "__main__":
             'echo "Started at $(date)"',
             'echo "Running job $SLURM_JOB_NAME with given JID $SLURM_JOB_ID on queue $SLURM_JOB_PARTITION"\n',
             f"source {profile_path}",
-            "conda activate torch"
+            f"conda activate {conda_env_name}"
         ]
         run = [
             "torchrun",

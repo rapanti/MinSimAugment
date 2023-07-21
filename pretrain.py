@@ -5,6 +5,7 @@ import os
 import sys
 import time
 import datetime
+from collections import defaultdict
 from pathlib import Path
 
 import torch
@@ -17,11 +18,13 @@ from omegaconf import OmegaConf
 from torch.utils.data import DistributedSampler, DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
+from torchvision import transforms
+
 import data
 import distributed as dist
 import builder
+import msatransform
 import select_crops
-import custom_transform
 import utils
 
 import resnet_cifar
@@ -29,11 +32,10 @@ import resnet_imagenet
 
 
 def custom_collate(batch):
-    bs = len(batch[0][0][0])
-    images = [torch.stack([item[0][0][n] for item in batch]) for n in range(bs)]
-    params = [[item[0][1][n] for item in batch] for n in range(bs)]
-    # target = [item[1] for item in batch]
-    return images, params
+    bs = len(batch[0][0])
+    images = [torch.stack([item[0][n] for item in batch]) for n in range(bs)]
+    targets = [item[1] for item in batch]
+    return images, targets
 
 
 def main(cfg):
@@ -84,16 +86,17 @@ def main(cfg):
     else:
         mean, std = data.IMAGENET_DEFAULT_MEAN, data.IMAGENET_DEFAULT_STD
 
-    transform = custom_transform.TransformParams(
-        crop_size=cfg.crop_size,
-        crop_scale=cfg.crop_scale,
-        blur_prob=cfg.blur_prob,
-        hflip_prob=cfg.hflip_prob,
-        mean=mean,
-        std=std,
-    )
-    multi_crops_transform = data.MultiCropsTransform(transform, cfg.num_crops)
-    dataset, _ = data.make_dataset(cfg.data_path, cfg.dataset, True, multi_crops_transform)
+    rrc = transforms.RandomResizedCrop(cfg.crop_size, cfg.crop_scale)
+    transform = transforms.Compose([
+        transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8),
+        transforms.RandomGrayscale(p=0.2),
+        transforms.RandomApply([transforms.GaussianBlur(9, (0.1, 2.0))], p=cfg.blur_prob),
+        transforms.RandomHorizontalFlip(p=cfg.hflip_prob),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=mean, std=std)
+    ])
+    msat = msatransform.MSATransform(rrc, cfg.epochs, 0.3, 0.35, transforms=transform)
+    dataset, _ = data.make_dataset(cfg.data_path, cfg.dataset, True, msat)
 
     sampler = DistributedSampler(dataset)
     cfg.batch_size_per_gpu = cfg.batch_size // dist.get_world_size()
@@ -107,7 +110,7 @@ def main(cfg):
         collate_fn=custom_collate,
     )
 
-    select_fn = select_crops.names[cfg.select_fn]
+    # select_fn = select_crops.names[cfg.select_fn]
 
     # ============ optionally resume training ... ============
     to_restore = {"epoch": 0, "total_time": 0}
@@ -126,10 +129,11 @@ def main(cfg):
 
     for epoch in range(start_epoch, cfg.epochs):
         loader.sampler.set_epoch(epoch)
+        msat.set_epoch(epoch)
         adjust_learning_rate(optimizer, init_lr, epoch, cfg)
 
         start = time.time()
-        train_stats, metrics = train(loader, model, criterion, optimizer, epoch, cfg, fp16, board, select_fn)
+        train_stats, metrics = train(loader, model, criterion, optimizer, epoch, cfg, fp16, board)
         total_time += int(time.time() - start)
 
         save_dict = {
@@ -155,24 +159,17 @@ def main(cfg):
     print('Training time {}'.format(total_time_str))
 
 
-def train(loader, model, criterion, optimizer, epoch, cfg, fp16, board, select_fn):
+def train(loader, model, criterion, optimizer, epoch, cfg, fp16, board):
     model.train()
-    metrics = {
-        "epoch": epoch,
-        "loss": [],
-        "lr": [],
-        "selected": [],
-        "params": [],
-        "sample-loss": [],
-    }
+    metrics = defaultdict(list)
+    metrics["epoch"] = epoch
     metric_logger = utils.MetricLogger(delimiter=" ")
     header = 'Epoch: [{}/{}]'.format(epoch, cfg.epochs)
-    for it, (images, params) in enumerate(metric_logger.log_every(loader, cfg.print_freq, header)):
+    for it, (images, _) in enumerate(metric_logger.log_every(loader, cfg.print_freq, header)):
         it = len(loader) * epoch + it  # global training iteration
 
         images = [im.cuda(non_blocking=True) for im in images]
-
-        x1, x2, selected, sample_loss = select_fn(images, model, fp16)
+        x1, x2 = images
 
         with torch.cuda.amp.autocast(fp16 is not None):
             p1, p2, z1, z2 = model(x1=x1, x2=x2)
@@ -195,11 +192,10 @@ def train(loader, model, criterion, optimizer, epoch, cfg, fp16, board, select_f
         metrics["loss"].append(loss.item())
         metrics["lr"].append(optimizer.param_groups[0]["lr"])
         if cfg.use_adv_metric and it % cfg.adv_metric_freq == 0:
-            metrics["selected"].append(selected.tolist())
-            metrics["params"].append(params)
-            metrics["sample-loss"].append(sample_loss.tolist())
+            # no advanced metrics to log
+            pass
 
-        if dist.is_main_process() and it % cfg.logger_freq == 0:
+        if dist.is_main_process() and it % cfg.log_freq == 0:
             board.add_scalar("training loss", loss.item(), it)
             board.add_scalar("training lr", optimizer.param_groups[0]["lr"], it)
 
@@ -256,8 +252,12 @@ def get_args_parser():
                    help="Horizontal-Flip probability (default: 0.5)")
 
     # MinSim parameters:
-    p.add_argument("--num_crops", default=2, type=int, help="Number of crops")
-    p.add_argument("--select_fn", default="identity", type=str, choices=select_crops.names)
+    # p.add_argument("--num_crops", default=2, type=int, help="Number of crops")
+    # p.add_argument("--select_fn", default="identity", type=str, choices=select_crops.names)
+    p.add_argument("--start_val", type=float, default=None,
+                   help="Initial value of the MSATransform parameter for rejection sampling")
+    p.add_argument("--end_val", type=float, default=None,
+                   help="End value of the MSAT parameter")
 
     # Misc
     p.add_argument('--fp16', default=True, type=utils.bool_flag,
@@ -276,7 +276,7 @@ def get_args_parser():
                    help="url used to set up distributed training")
     p.add_argument("--print_freq", default=10, type=int,
                    help="Print progress every x iterations (default: 10)")
-    p.add_argument("--logger_freq", default=50, type=int,
+    p.add_argument("--log_freq", default=50, type=int,
                    help="Log progress every x iterations to tensorboard (default: 50)")
     p.add_argument("--use_adv_metric", default=False, type=utils.bool_flag,
                    help="Log advanced metrics: transforms params, crop selection, sample-loss, ... (default: False)")
