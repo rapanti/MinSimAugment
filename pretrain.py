@@ -19,12 +19,12 @@ from torch.utils.data import DistributedSampler, DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 from torchvision import transforms
+import transforms_p as tp
 
 import data
 import distributed as dist
 import builder
 import msatransform
-import select_crops
 import utils
 
 import resnet_cifar
@@ -32,10 +32,11 @@ import resnet_imagenet
 
 
 def custom_collate(batch):
-    bs = len(batch[0][0])
-    images = [torch.stack([item[0][n] for item in batch]) for n in range(bs)]
+    ncrops = len(batch[0][0][0])
+    images = [torch.stack([item[0][0][n] for item in batch]) for n in range(ncrops)]
+    params = [[item[0][1][n] for item in batch] for n in range(ncrops)]
     targets = [item[1] for item in batch]
-    return images, targets
+    return images, params, targets
 
 
 def main(cfg):
@@ -88,10 +89,10 @@ def main(cfg):
 
     rrc = transforms.RandomResizedCrop(cfg.crop_size, cfg.crop_scale)
     transform = transforms.Compose([
-        transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8),
-        transforms.RandomGrayscale(p=0.2),
-        transforms.RandomApply([transforms.GaussianBlur(9, (0.1, 2.0))], p=cfg.blur_prob),
-        transforms.RandomHorizontalFlip(p=cfg.hflip_prob),
+        tp.RandomColorJitter(0.4, 0.4, 0.4, 0.1, p=0.8),
+        tp.RandomGrayscale(p=0.2),
+        tp.RandomGaussianBlur(9, (0.1, 2.0), p=cfg.blur_prob),
+        tp.RandomHorizontalFlip(p=cfg.hflip_prob),
         transforms.ToTensor(),
         transforms.Normalize(mean=mean, std=std)
     ])
@@ -165,7 +166,7 @@ def train(loader, model, criterion, optimizer, epoch, cfg, fp16, board):
     metrics["epoch"] = epoch
     metric_logger = utils.MetricLogger(delimiter=" ")
     header = 'Epoch: [{}/{}]'.format(epoch, cfg.epochs)
-    for it, (images, _) in enumerate(metric_logger.log_every(loader, cfg.print_freq, header)):
+    for it, (images, params, _) in enumerate(metric_logger.log_every(loader, cfg.print_freq, header)):
         it = len(loader) * epoch + it  # global training iteration
 
         images = [im.cuda(non_blocking=True) for im in images]
@@ -186,14 +187,14 @@ def train(loader, model, criterion, optimizer, epoch, cfg, fp16, board):
 
         # logging
         torch.cuda.synchronize()
+
         metric_logger.update(loss=loss.item())
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
 
         metrics["loss"].append(loss.item())
         metrics["lr"].append(optimizer.param_groups[0]["lr"])
-        if cfg.use_adv_metric and it % cfg.adv_metric_freq == 0:
-            # no advanced metrics to log
-            pass
+        if dist.is_main_process() and cfg.use_adv_metric and it % cfg.adv_metric_freq == 0:
+            metrics["params"].append(params)
 
         if dist.is_main_process() and it % cfg.log_freq == 0:
             board.add_scalar("training loss", loss.item(), it)

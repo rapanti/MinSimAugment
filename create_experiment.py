@@ -21,7 +21,7 @@ if __name__ == "__main__":
                               help="If n > 0 submits a job array n+1 jobs")
     slurm_parser.add_argument("--time", default="23:59:59", type=str)
     slurm_parser.add_argument("--head", default="simsiam-msatransform", type=str)
-    slurm_parser.add_argument("--descr", default="baseline", type=str)
+    slurm_parser.add_argument("--descr", default="initial", type=str)
     slurm_parser.add_argument("--exp_dir", default=None, type=str)
 
     pretrain_parser = pretrain_get_args_parser()

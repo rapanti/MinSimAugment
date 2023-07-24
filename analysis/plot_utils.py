@@ -89,15 +89,17 @@ def save_histogram(
 
 
 def get_dims(x):
+    # input: HEIGHT, WIDTH, top, left, height, width
+    # out: top, bottom, left, right
     return x[2], x[2] + x[4], x[3], x[3] + x[5]
 
 
 def calc_overlap(x1, x2):
-    l1, r1, t1, b1 = get_dims(x1)
-    l2, r2, t2, b2 = get_dims(x2)
-    w = max(0, min(r1, r2) - max(l1, l2))
+    t1, b1, l1, r1 = get_dims(x1)
+    t2, b2, l2, r2 = get_dims(x2)
     h = max(0, min(b1, b2) - max(t1, t2))
-    return w * h
+    w = max(0, min(r1, r2) - max(l1, l2))
+    return h * w
 
 
 def calc_overlap_norm(x1, x2):
@@ -107,8 +109,8 @@ def calc_overlap_norm(x1, x2):
 
 
 def calc_area(x):
-    w, h = x[-2:]
-    return w * h
+    h, w = x[-2:]
+    return h * w
 
 
 def calc_iou(x1, x2):
