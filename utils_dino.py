@@ -91,6 +91,7 @@ class DINOLoss(nn.Module):
         self.center_momentum = center_momentum
         self.ncrops = ncrops
         self.register_buffer("center", torch.zeros(1, out_dim))
+        self.register_buffer("running_center", torch.zeros(1, out_dim))
         # we apply a warm up for the teacher temperature because
         # a too high temperature makes the training instable at the beginning
         self.teacher_temp_schedule = np.concatenate((
@@ -122,20 +123,24 @@ class DINOLoss(nn.Module):
                 total_loss += loss.mean()
                 n_loss_terms += 1
         total_loss /= n_loss_terms
-        self.update_center(teacher_output)
+        self.center_step(teacher_output)
         return total_loss
 
     @torch.no_grad()
-    def update_center(self, teacher_output):
+    def center_step(self, teacher_output):
+        self.running_center += torch.sum(teacher_output, dim=0, keepdim=True)
+
+    @torch.no_grad()
+    def update_center(self, teacher_output, accum_steps):
         """
         Update center used for teacher output.
         """
-        batch_center = torch.sum(teacher_output, dim=0, keepdim=True)
-        dist.all_reduce(batch_center)
-        batch_center = batch_center / (len(teacher_output) * dist.get_world_size())
+        dist.all_reduce(self.running_center)
+        batch_center = self.running_center / (len(teacher_output) * dist.get_world_size() * accum_steps)
 
         # ema update
         self.center = self.center * self.center_momentum + batch_center * (1 - self.center_momentum)
+        self.running_center.zero_()
 
     def select_forward(self, student_output, teacher_output, epoch):
         student_out = student_output / self.student_temp

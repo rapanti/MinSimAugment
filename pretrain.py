@@ -84,11 +84,11 @@ def main(cfg):
     dataset, _ = data.make_dataset(cfg.data_path, cfg.dataset, True, two_crops_transform)
 
     sampler = DistributedSampler(dataset)
-    cfg.batch_size_per_gpu = cfg.batch_size // dist.get_world_size()
+    batch_size_per_gpu = (cfg.batch_size // cfg.grad_accum_steps) // dist.get_world_size()
     data_loader = DataLoader(
         dataset,
         sampler=sampler,
-        batch_size=cfg.batch_size_per_gpu,
+        batch_size=batch_size_per_gpu,
         num_workers=cfg.num_workers,
         pin_memory=True,
         drop_last=True,
@@ -173,9 +173,10 @@ def main(cfg):
     # for mixed precision training
     fp16 = torch.cuda.amp.GradScaler() if cfg.fp16 else None
 
+    init_lr = cfg.lr * cfg.batch_size / 256.  # linear scaling rule
     # ============ init schedulers ... ============
     lr_schedule = utils.cosine_scheduler(
-        cfg.lr * (cfg.batch_size_per_gpu * dist.get_world_size()) / 256.,  # linear scaling rule
+        init_lr,
         cfg.min_lr,
         cfg.epochs, len(data_loader),
         warmup_epochs=cfg.warmup_epochs,
@@ -251,9 +252,11 @@ def train_one_epoch(student, teacher, teacher_without_ddp, dino_loss, data_loade
     metrics["epoch"] = epoch
     metric_logger = utils.MetricLogger(delimiter=" ")
     header = 'Epoch: [{}/{}]'.format(epoch, cfg.epochs)
-    for it, (images, params) in enumerate(metric_logger.log_every(data_loader, 10, header)):
+    loss_accum = torch.zeros(1, device=student.device)
+    for it, (images, params) in enumerate(metric_logger.log_every(data_loader, 10, header), start=1):
         # update weight decay and learning rate according to their schedule
         it = len(data_loader) * epoch + it  # global training iteration
+        do_optimizer_step = not (it % cfg.grad_accum_steps)
         for i, param_group in enumerate(optimizer.param_groups):
             param_group["lr"] = lr_schedule[it]
             if i == 0:  # only the first group is regularized
@@ -268,55 +271,61 @@ def train_one_epoch(student, teacher, teacher_without_ddp, dino_loss, data_loade
         with torch.cuda.amp.autocast(fp16 is not None):
             teacher_output = teacher(images[:2])  # only the 2 global views pass through the teacher
             student_output = student(images)
-            loss = dino_loss(student_output, teacher_output, epoch)
+            loss = dino_loss(student_output, teacher_output, epoch) / cfg.grad_accum_steps
+            loss_accum.add_(loss.detach())
+            dino_loss.center_step(teacher_output)
 
         if not math.isfinite(loss.item()):
             print("Loss is {}, stopping training".format(loss.item()), force=True)
             sys.exit(1)
 
         # student update
-        optimizer.zero_grad()
         param_norms = None
-        if fp16 is None:
-            loss.backward()
-            if cfg.clip_grad:
-                param_norms = torch.nn.utils.clip_grad_norm_(student.parameters(), cfg.clip_grad)
-            utils.cancel_gradients_last_layer(epoch, student, cfg.freeze_last_layer)
-            optimizer.step()
-        else:
-            fp16.scale(loss).backward()
-            if cfg.clip_grad:
-                fp16.unscale_(optimizer)  # unscale the gradients of optimizer's assigned params in-place
-                param_norms = torch.nn.utils.clip_grad_norm_(student.parameters(), cfg.clip_grad)
-            utils.cancel_gradients_last_layer(epoch, student, cfg.freeze_last_layer)
-            fp16.step(optimizer)
-            fp16.update()
+        loss.backward() if fp16 is None else fp16.scale(loss).backward()
 
-        # EMA update for the teacher
-        with torch.no_grad():
-            m = momentum_schedule[it]  # momentum parameter
-            for param_q, param_k in zip(student.module.parameters(), teacher_without_ddp.parameters()):
-                param_k.data.mul_(m).add_((1 - m) * param_q.detach().data)
+        if do_optimizer_step:
+            if fp16 is None:
+                if cfg.clip_grad:
+                    param_norms = torch.nn.utils.clip_grad_norm_(student.parameters(), cfg.clip_grad)
+                utils.cancel_gradients_last_layer(epoch, student, cfg.freeze_last_layer)
+                optimizer.step()
+            else:
+                if cfg.clip_grad:
+                    fp16.unscale_(optimizer)
+                    param_norms = torch.nn.utils.clip_grad_norm_(student.parameters(), cfg.clip_grad)
+                utils.cancel_gradients_last_layer(epoch, student, cfg.freeze_last_layer)
+                fp16.step(optimizer)
+                fp16.update()
+
+            dino_loss.update_center(teacher_output, cfg.grad_accum_steps)
+
+            # EMA update for the teacher
+            with torch.no_grad():
+                m = momentum_schedule[it]  # momentum parameter
+                for param_q, param_k in zip(student.module.parameters(), teacher_without_ddp.parameters()):
+                    param_k.data.mul_(m).add_((1 - m) * param_q.detach().data)
 
         # logging
         torch.cuda.synchronize()
-        metric_logger.update(loss=loss.item())
-        metric_logger.update(lr=optimizer.param_groups[0]["lr"])
-        metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])
+        if do_optimizer_step:
+            metric_logger.update(loss=loss_accum.item())
+            metric_logger.update(lr=optimizer.param_groups[0]["lr"])
+            metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])
 
-        metrics["loss"].append(loss.item())
-        metrics["lr"].append(optimizer.param_groups[0]["lr"])
-        metrics["param_norms"].append(param_norms.item())
-        if cfg.use_adv_metric and it % cfg.adv_metric_freq == 0:
-            metrics["selected"].append(selected.tolist())
-            metrics["params"].append(params)
-            metrics["sample-loss"].append(sample_loss.tolist())
+            metrics["loss"].append(loss_accum.item())
+            metrics["lr"].append(optimizer.param_groups[0]["lr"])
+            metrics["param_norms"].append(param_norms.item())
+            if dist.is_main_process() and cfg.use_adv_metric and not it % cfg.adv_metric_freq:
+                metrics["selected"].append(selected.tolist())
+                metrics["params"].append(params)
+                metrics["sample-loss"].append(sample_loss.tolist())
 
-        if dist.is_main_process() and it % cfg.logger_freq == 0:
-            board.add_scalar("training loss", loss.item(), it)
-            board.add_scalar("training lr", optimizer.param_groups[0]["lr"], it)
-            board.add_scalar("training wd", optimizer.param_groups[0]["weight_decay"], it)
-            board.add_scalar("param_norms", param_norms.item(), it)
+            if dist.is_main_process() and not it % cfg.logger_freq:
+                board.add_scalar("training loss", loss_accum.item(), it)
+                board.add_scalar("training lr", optimizer.param_groups[0]["lr"], it)
+                board.add_scalar("training wd", optimizer.param_groups[0]["weight_decay"], it)
+                board.add_scalar("param_norms", param_norms.item(), it)
+            loss_accum.zero_()
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
@@ -393,8 +402,8 @@ def get_args_parser():
                    help="Size of local crops (default: 96)")
 
     # MinSim parameters:
-    p.add_argument("--num_crops", default=4, type=int, help="Number of crops")
-    p.add_argument("--select_fn", default="cross", type=str, choices=select_crops.names)
+    p.add_argument("--num_crops", type=int, help="Number of crops")
+    p.add_argument("--select_fn", type=str, choices=select_crops.names)
 
     # Misc
     p.add_argument('--dataset', type=str, default="ImageNet",
@@ -421,7 +430,8 @@ def get_args_parser():
                    help="Log advanced metrics: transforms params, crop selection, sample-loss, ... (default: False)")
     p.add_argument("--adv_metric_freq", default=100, type=int,
                    help="Log advanced metrics every x iterations (default: 100)")
-
+    p.add_argument("--grad_accum_steps", default=1, type=int,
+                   help="Gradient accumulation. Effective BS = batch_size * grad_accum_steps.")
     return p
 
 

@@ -1,5 +1,5 @@
 arch: vit_tiny
-batch_size: 128
+batch_size: 256
 clip_grad: 3.0
 dataset: CIFAR10
 drop_path_rate: 0.1
@@ -44,3 +44,5 @@ print_freq: 10
 logger_freq: 50
 use_adv_metric: true
 adv_metric_freq: 100
+# Gradient Accumulation
+grad_accum_steps: 4

@@ -15,7 +15,7 @@ if __name__ == "__main__":
     slurm_parser = argparse.ArgumentParser("SlurmParser")
     slurm_parser.add_argument("--gpus", default=1, type=int,
                               help="Number of GPUs to use")
-    slurm_parser.add_argument("--partition", default="ml_gpu-rtxA6000", type=str,
+    slurm_parser.add_argument("--partition", default=None, type=str,
                               help="The name of the compute partition to use")
     slurm_parser.add_argument("--array", default=0, type=int,
                               help="If n > 0 submits a job array n+1 jobs")
@@ -29,7 +29,7 @@ if __name__ == "__main__":
 
     current_username = getpass.getuser()
     conda_env_name = "torch" if current_username == "rapanti" else "minsim2"
-    profile_path = "~/.source" if current_username == "rapanti" else "/home/ferreira/.profile"
+    profile_path = "~/.profile" if current_username == "rapanti" else "/home/ferreira/.profile"
 
     if len(sys.argv) > 1:
         slurm_args, rest = slurm_parser.parse_known_args()
@@ -86,7 +86,7 @@ if __name__ == "__main__":
                 eval_linear_parser.print_usage()
                 continue
             temp = eval_linear_parser.parse_args(line.split())
-            path_to_def = f"configs/{temp.dataset}/eval_linear_default.yaml"
+            path_to_def = f"configs/{args.dataset}/eval_linear_default.yaml"
             eval_linear_args = OmegaConf.load(path_to_def)
             for arg in vars(temp):
                 value = temp.__dict__[arg]
@@ -94,12 +94,11 @@ if __name__ == "__main__":
                     eval_linear_args[arg] = value
             break
 
-    if current_username == "rapanti":
-        exp_dir = "/work/dlclarge2/rapanti-MinSimAugment/experiments" \
-            if slurm_args.exp_dir is None else slurm_args.exp_dir
-    else:
-        exp_dir = "/work/dlclarge1/ferreira-simsiam/minsim_experiments" \
-            if slurm_args.exp_dir is None else slurm_args.exp_dir
+    if slurm_args.exp_dir is None:
+        if current_username == "rapanti":
+            exp_dir = "/work/dlclarge2/rapanti-MinSimAugment/experiments"
+        else:
+            exp_dir = "/work/dlclarge1/ferreira-simsiam/minsim_experiments" \
 
     if args.data_path is None:
         if args.dataset == "CIFAR10":
@@ -111,6 +110,12 @@ if __name__ == "__main__":
             args.data_path = "/data/datasets/ImageNet/imagenet-pytorch"
         else:
             raise ValueError(f"Dataset '{args.dataset}' has no default path. Specify path to dataset.")
+
+    if slurm_args.partition is None:
+        if current_username == "rapanti":
+            slurm_args.partition = "mlhiwidlc_gpu-rtx2080-advanced"
+        else:
+            slurm_args.partition = "alldlc_gpu-rtx2080"
 
     # make sure that these arguments are the same
     eval_linear_args.arch = args.arch
@@ -151,7 +156,8 @@ if __name__ == "__main__":
 
         slurm_file = slurm_dir.joinpath("%A.%a.%N.txt")
         sbatch = [
-            "#!/bin/bash", f"#SBATCH -p {slurm_args.partition}",
+            "#!/bin/bash",
+            f"#SBATCH -p {slurm_args.partition}",
             f"#SBATCH -t {slurm_args.time}",
             f"#SBATCH --gres=gpu:{slurm_args.gpus}",
             f"#SBATCH -J {exp_name}",
