@@ -96,7 +96,7 @@ def main(cfg):
         transforms.ToTensor(),
         transforms.Normalize(mean=mean, std=std)
     ])
-    msat = msatransform.MSATransform(rrc, cfg.epochs, 0.3, 0.35, transforms=transform)
+    msat = msatransform.MSATransform(rrc, cfg.epochs, cfg.start_val, cfg.end_val, transforms=transform)
     dataset, _ = data.make_dataset(cfg.data_path, cfg.dataset, True, msat)
 
     sampler = DistributedSampler(dataset)
