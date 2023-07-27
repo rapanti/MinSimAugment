@@ -253,10 +253,10 @@ def train_one_epoch(student, teacher, teacher_without_ddp, dino_loss, data_loade
     metric_logger = utils.MetricLogger(delimiter=" ")
     header = 'Epoch: [{}/{}]'.format(epoch, cfg.epochs)
     loss_accum = torch.zeros(1, device=student.device)
-    for it, (images, params) in enumerate(metric_logger.log_every(data_loader, 10, header), start=1):
+    for it, (images, params) in enumerate(metric_logger.log_every(data_loader, 10, header)):
         # update weight decay and learning rate according to their schedule
         it = len(data_loader) * epoch + it  # global training iteration
-        do_optimizer_step = not (it % cfg.grad_accum_steps)
+        do_optimizer_step = not (it + 1) % cfg.grad_accum_steps
         for i, param_group in enumerate(optimizer.param_groups):
             param_group["lr"] = lr_schedule[it]
             if i == 0:  # only the first group is regularized
@@ -279,25 +279,26 @@ def train_one_epoch(student, teacher, teacher_without_ddp, dino_loss, data_loade
             print("Loss is {}, stopping training".format(loss.item()), force=True)
             sys.exit(1)
 
-        # student update
-        param_norms = None
+        # backpropagation
         loss.backward() if fp16 is None else fp16.scale(loss).backward()
 
         if do_optimizer_step:
+            grad_norms = None
             if fp16 is None:
                 if cfg.clip_grad:
-                    param_norms = torch.nn.utils.clip_grad_norm_(student.parameters(), cfg.clip_grad)
+                    grad_norms = torch.nn.utils.clip_grad_norm_(student.parameters(), cfg.clip_grad)
                 utils.cancel_gradients_last_layer(epoch, student, cfg.freeze_last_layer)
                 optimizer.step()
             else:
                 if cfg.clip_grad:
                     fp16.unscale_(optimizer)
-                    param_norms = torch.nn.utils.clip_grad_norm_(student.parameters(), cfg.clip_grad)
+                    grad_norms = torch.nn.utils.clip_grad_norm_(student.parameters(), cfg.clip_grad)
                 utils.cancel_gradients_last_layer(epoch, student, cfg.freeze_last_layer)
                 fp16.step(optimizer)
                 fp16.update()
 
             dino_loss.update_center(teacher_output, cfg.grad_accum_steps)
+            optimizer.zero_grad()
 
             # EMA update for the teacher
             with torch.no_grad():
@@ -305,26 +306,29 @@ def train_one_epoch(student, teacher, teacher_without_ddp, dino_loss, data_loade
                 for param_q, param_k in zip(student.module.parameters(), teacher_without_ddp.parameters()):
                     param_k.data.mul_(m).add_((1 - m) * param_q.detach().data)
 
-        # logging
-        torch.cuda.synchronize()
-        if do_optimizer_step:
+            torch.cuda.synchronize()
+
+            # logging
             metric_logger.update(loss=loss_accum.item())
             metric_logger.update(lr=optimizer.param_groups[0]["lr"])
             metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])
 
             metrics["loss"].append(loss_accum.item())
             metrics["lr"].append(optimizer.param_groups[0]["lr"])
-            metrics["param_norms"].append(param_norms.item())
-            if dist.is_main_process() and cfg.use_adv_metric and not it % cfg.adv_metric_freq:
-                metrics["selected"].append(selected.tolist())
-                metrics["params"].append(params)
-                metrics["sample-loss"].append(sample_loss.tolist())
+            metrics["param_norms"].append(grad_norms.item())
+            if dist.is_main_process():
+                log_step = it // cfg.grad_accum_steps
+                if cfg.use_adv_metric and not log_step % cfg.adv_metric_freq:
+                    metrics["selected"].append(selected.tolist())
+                    metrics["params"].append(params)
+                    metrics["sample-loss"].append(sample_loss.tolist())
 
-            if dist.is_main_process() and not it % cfg.logger_freq:
-                board.add_scalar("training loss", loss_accum.item(), it)
-                board.add_scalar("training lr", optimizer.param_groups[0]["lr"], it)
-                board.add_scalar("training wd", optimizer.param_groups[0]["weight_decay"], it)
-                board.add_scalar("param_norms", param_norms.item(), it)
+                if not log_step % cfg.logger_freq:
+                    board.add_scalar("training loss", loss_accum.item(), it)
+                    board.add_scalar("training lr", optimizer.param_groups[0]["lr"], it)
+                    board.add_scalar("training wd", optimizer.param_groups[0]["weight_decay"], it)
+                    board.add_scalar("training grad-norms", grad_norms.item(), it)
+
             loss_accum.zero_()
 
     # gather the stats from all processes
