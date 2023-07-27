@@ -82,7 +82,7 @@ def main(cfg):
         print(f"Unknown architecture: {cfg.arch}")
         sys.exit(1)
 
-    model = arch.__dict__[cfg.arch](
+    model = arch(
         num_classes=cfg.num_labels
     ).cuda()
 
