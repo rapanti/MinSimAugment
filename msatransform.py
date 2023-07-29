@@ -34,6 +34,7 @@ class MSATransform(nn.Module):
                  total_epochs: int,
                  start_val: float = 0.5,
                  end_val: float = None,
+                 schedule: str = 'linear',
                  transforms: Compose = None,
                  ):
         super().__init__()
@@ -42,7 +43,10 @@ class MSATransform(nn.Module):
 
         if end_val is None:
             end_val = start_val
-        self.schedule = np.linspace(start_val, end_val, total_epochs)
+        if schedule == 'linear':
+            self.schedule = np.linspace(start_val, end_val, total_epochs)
+        elif schedule == 'cosine':
+            self.schedule = cosine_scheduler(start_val, end_val, total_epochs, 1)
         self.start_val = start_val
         self.end_val = end_val
 
@@ -50,13 +54,14 @@ class MSATransform(nn.Module):
         self.transforms = transforms
 
     def forward(self, img):
-        for _ in range(128):
+        for n in range(128):
             p1 = self.rrc.get_params(img, self.rrc.scale, self.rrc.ratio)
             p2 = self.rrc.get_params(img, self.rrc.scale, self.rrc.ratio)
 
             if calc_iou(p1, p2) > self.schedule[self.epoch]:
                 continue
             break
+        n += 1
         _, height, width = tf.get_dimensions(img)
         img1 = tf.resized_crop(img, *p1, self.rrc.size, self.rrc.interpolation, antialias=self.rrc.antialias)
         img2 = tf.resized_crop(img, *p2, self.rrc.size, self.rrc.interpolation, antialias=self.rrc.antialias)
@@ -64,7 +69,7 @@ class MSATransform(nn.Module):
         img1, out1 = self.apply_transforms(img1)
         img2, out2 = self.apply_transforms(img2)
 
-        params = [[height, width, *p1], *out1], [[height, width, *p2], *out2]
+        params = [[height, width, *p1, n], *out1], [[height, width, *p2, n], *out2]
 
         return [img1, img2], params
 
@@ -82,3 +87,10 @@ class MSATransform(nn.Module):
         return img, params
 
 
+def cosine_scheduler(base_value, final_value, epochs, niter_per_ep):
+    iters = np.arange(epochs * niter_per_ep)
+    if base_value < final_value:
+        schedule = base_value + 0.5 * (final_value - base_value) * (1 + np.cos(np.pi * (iters / len(iters) + 1)))
+        return schedule
+    schedule = final_value + 0.5 * (base_value - final_value) * (1 + np.cos(np.pi * (iters / len(iters))))
+    return schedule

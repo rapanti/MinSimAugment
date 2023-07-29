@@ -259,6 +259,8 @@ def get_args_parser():
                    help="Initial value of the MSATransform parameter for rejection sampling")
     p.add_argument("--end_val", type=float, default=None,
                    help="End value of the MSAT parameter")
+    p.add_argument("--msat_schedule", type=str, choices=['linear', 'cosine'],
+                   help="schedule type for MSAT value")
 
     # Misc
     p.add_argument('--fp16', default=True, type=utils.bool_flag,
