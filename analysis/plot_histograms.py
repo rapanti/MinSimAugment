@@ -64,29 +64,43 @@ def normed_overlap_un_select_one_epoch(epoch_metrics):
     return select, unselect
 
 
+# def get_hist_data(epoch_metric, typ):
+#     match typ:
+#         case "overlap":
+#             fn = normed_overlap_un_select_one_epoch
+#         case "iou":
+#             fn = iou_un_select_one_epoch
+#         case "iou-vs-rand":
+#             fn = iou_un_select_one_epoch_vs_random
+#         case _:
+#             print(f"{typ} not supported")
+#             sys.exit()
+#     sel, uns = fn(epoch_metric)
+#     return [np.array(sel), np.array(uns)]
+
 def get_hist_data(epoch_metric, typ):
-    match typ:
-        case "overlap":
+    if typ == "overlap":
             fn = normed_overlap_un_select_one_epoch
-        case "iou":
+    elif typ == "iou":
             fn = iou_un_select_one_epoch
-        case "iou-vs-rand":
+    elif typ == "iou-vs-rand":
             fn = iou_un_select_one_epoch_vs_random
-        case _:
-            print(f"{typ} not supported")
-            sys.exit()
+    else:
+        print(f"{typ} not supported")
+        sys.exit()
     sel, uns = fn(epoch_metric)
     return [np.array(sel), np.array(uns)]
 
 
 if __name__ == "__main__":
-    seeds = 0, 1, 2
+    # seeds = 0, 1, 2
+    seeds = [0]
     for seed in seeds:
-        data_path = f"../../exp_data/metrics{seed}.json"
+        data_path = f"/Users/fabioferreira/Downloads/metrics.json"
         metrics = read_file(data_path)
 
         typ = "iou"  # "iou" "overlap" "iou-vs-rand"
-        exp_name = f"simsiam-minsim-collect_metrics-resnet50-ImageNet-ep100-bs256-select_cross-ncrops4-lr0.05-wd0.0001-mom0.9-seed{seed}"
+        exp_name = f"dino-minsim-baseline-vit_small_p16-ImageNet-ep100-bs512-select_cross-ncrops4-lr0.0005-wd0.04-out_dim65k-seed{seed}"
         path = f"plots/{exp_name}/histograms-{typ}"
 
         title = f"{typ} of Selected vs Not-Selected"  # "IoU of Selected vs Not-Selected (Random)"

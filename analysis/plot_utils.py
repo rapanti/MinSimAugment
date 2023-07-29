@@ -31,7 +31,7 @@ def save_plot(
         std = [None for _ in data] if std is None else [std]
     assert len(data) == len(std)
 
-    if not isinstance(labels, Union[List, Tuple]):
+    if not isinstance(labels, (list, tuple)):
         labels = np.arange(len(data)) if labels is None else [labels]
     assert len(data) == len(labels)
 

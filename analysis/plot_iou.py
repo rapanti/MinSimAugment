@@ -43,16 +43,18 @@ def get_overlap_data(metrics):
 
 
 if __name__ == "__main__":
-    seeds = 0, 1, 2
+    # seeds = 0, 1, 2
+    seeds = [1]
     for seed in seeds:
-        data_path = f"../../exp_data/metrics{seed}.json"
+        # data_path = f"../../exp_data/metrics{seed}.json"
+        data_path = "/Users/fabioferreira/Downloads/metrics.json"
         metrics = read_file(data_path)
 
-        exp_name = f"simsiam-minsim-collect_metrics-resnet50-ImageNet-ep100-bs256-select_cross-ncrops4-lr0.05-wd0.0001-mom0.9-seed{seed}"
+        exp_name = f"dino-minsim-baseline-vit_small_p16-ImageNet-ep100-bs512-select_cross-ncrops4-lr0.0005-wd0.04-out_dim65k-seed{seed}"
         path = f"plots/{exp_name}/iou-avg"
         file_name = f"iou_seed{seed}.png"  # name.png
 
-        data = get_iou_data(metrics)
+        data = get_iou_data(metrics[:5])
         labels = "selected", "not-selected"
 
         title = "Average IoU of selected/not-selected pairs"
