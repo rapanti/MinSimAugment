@@ -54,7 +54,7 @@ class MSATransform(nn.Module):
         self.transforms = transforms
 
     def forward(self, img):
-        for n in range(128):
+        for n in range(512):
             p1 = self.rrc.get_params(img, self.rrc.scale, self.rrc.ratio)
             p2 = self.rrc.get_params(img, self.rrc.scale, self.rrc.ratio)
 
