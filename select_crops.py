@@ -1,3 +1,5 @@
+import itertools as it
+
 import torch
 import torch.nn.functional as nnf
 
@@ -9,32 +11,37 @@ def select_crops_identity(images, student, teacher, criterion, fp16, num_crops, 
 @torch.no_grad()
 def select_crops_cross(images, student, teacher, criterion, fp16, num_crops, epoch):
     b, c, h, w = images[0].shape
-    device = images[0].device
+    device = student.device
 
-    globe = images[:num_crops]
-    local = images[num_crops:]
     with torch.cuda.amp.autocast(fp16 is not None):
-        teacher_output = teacher(globe)
-        student_output = student(globe)
-    student_output, teacher_output = student_output.chunk(num_crops), teacher_output.chunk(num_crops)
+        teacher_output = teacher(images[:4])
+        student_output = student(images)
+    student_output, teacher_output = criterion.prepare_outputs(student_output, teacher_output, epoch)
+    student_output, teacher_output = student_output.chunk(len(images)), teacher_output.chunk(4)
 
-    out1 = torch.zeros_like(images[0])
-    out2 = torch.zeros_like(images[0])
+    out = [torch.zeros_like(images[0]) for _ in range(2)] + [torch.zeros_like(images[-1]) for _ in range(2)]
+
     score = torch.full([b], 0, device=device)
-    selected = torch.zeros((2, b), dtype=torch.uint8)
+    selected = torch.zeros((4, b), dtype=torch.uint8)
 
-    for n, s in enumerate(student_output):
-        for m, t in enumerate(teacher_output[n+1:], n+1):
-            with torch.cuda.amp.autocast(fp16 is not None):
-                sim = criterion.select_forward(s, t, epoch)  # sample-loss
-                score, indices = torch.stack((score, sim)).max(dim=0)
-                indices = indices.type(torch.bool)
-            selected[0][indices] = n
-            selected[1][indices] = m
-            out1 = torch.where(indices[:, None, None, None], images[n], out1)
-            out2 = torch.where(indices[:, None, None, None], images[m], out2)
+    global_combinations = [(0, 1), (0, 3), (2, 1), (2, 3)]
+    # instead of it.combinations(range(4), 2)
+    # we use global_combinations to avoid "illegal" global views, because pair has same augmentations
+    for idg, idl in it.product(global_combinations, it.combinations(range(4, 8), 2)):
+        _teacher_out = [teacher_output[idg[0]], teacher_output[idg[1]]]
+        _student_out = [student_output[idg[0]], student_output[idg[1]], student_output[idl[0]], student_output[idl[1]]]
+        with torch.cuda.amp.autocast(fp16 is not None):
+            sim = criterion.select_forward(_student_out, _teacher_out)  # sample-loss
+            score, indices = torch.stack((score, sim)).max(dim=0)
+            indices = indices.type(torch.bool)
+        selected[0][indices] = idg[0]
+        selected[1][indices] = idg[1]
+        selected[2][indices] = idl[0]
+        selected[3][indices] = idl[1]
+        for n, ids in enumerate(idg + idl):
+            out[n] = torch.where(indices[:, None, None, None], images[ids], out[n])
 
-    return [out1, out2] + local, selected, score
+    return out, selected, score
 
 
 @torch.no_grad()

@@ -152,7 +152,7 @@ def main(cfg):
     # ============ preparing loss ... ============
     dino_loss = DINOLoss(
         cfg.out_dim,
-        cfg.local_crops_number + 2,  # total number of crops = 2 global crops + local_crops_number
+        4,  # total number of crops = 2 global crops + local_crops_number
         cfg.warmup_teacher_temp,
         cfg.teacher_temp,
         cfg.warmup_teacher_temp_epochs,

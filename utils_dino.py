@@ -142,11 +142,22 @@ class DINOLoss(nn.Module):
         self.center = self.center * self.center_momentum + batch_center * (1 - self.center_momentum)
         self.running_center.zero_()
 
-    def select_forward(self, student_output, teacher_output, epoch):
+    def prepare_outputs(self, student_output, teacher_output, epoch):
         student_out = student_output / self.student_temp
 
         # teacher centering and sharpening
         temp = self.teacher_temp_schedule[epoch]
         teacher_out = nnf.softmax((teacher_output - self.center) / temp, dim=-1)
+        return student_out, teacher_out
 
-        return torch.sum(-teacher_out * nnf.log_softmax(student_out, dim=-1), dim=-1)
+    @staticmethod
+    def select_forward(student_output, teacher_output):
+        total_loss = torch.zeros(student_output[0].size(0), device=student_output[0].device)
+        for iq, q in enumerate(teacher_output):
+            for v in range(len(student_output)):
+                if v == iq:
+                    # we skip cases where student and teacher operate on the same view
+                    continue
+                loss = torch.sum(-q * nnf.log_softmax(student_output[v], dim=-1), dim=-1)
+                total_loss += loss
+        return total_loss
