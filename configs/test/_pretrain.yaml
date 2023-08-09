@@ -18,16 +18,19 @@ select_fn: identity
 data_path: ../datasets/CIFAR10  # /data/datasets/ImageNet/imagenet-pytorch
 output_dir: exp
 num_crops: 2
+# experiment parameters
 fp16: true
 saveckp_freq: 0
 seed: 42
-num_workers: 9
+num_workers: 8
 dist_backend: gloo  # unix: nccl, win: gloo
 dist_url: env://
 print_freq: 10
 log_freq: 50
 use_adv_metric: true
 adv_metric_freq: 100
-#
+# MSAT parameters
 start_val: 0.25
 end_val: 0.3
+msat_schedule: linear
+msat_prob: 0.5

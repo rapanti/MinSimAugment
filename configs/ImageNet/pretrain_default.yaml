@@ -18,6 +18,7 @@ weight_decay: 0.0001
 start_val: 0.3
 end_val: null
 msat_schedule: linear
+msat_prob: 0.5
 # Misc parameters
 data_path: null
 output_dir: null

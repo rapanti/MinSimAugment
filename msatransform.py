@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 import torchvision.transforms.functional as tf
 from torchvision.transforms import Compose, RandomResizedCrop, ToTensor, Normalize
@@ -36,6 +37,7 @@ class MSATransform(nn.Module):
                  end_val: float = None,
                  schedule: str = 'linear',
                  transforms: Compose = None,
+                 p: float = 0.5,
                  ):
         super().__init__()
         self.epoch = 0
@@ -49,19 +51,24 @@ class MSATransform(nn.Module):
             self.schedule = cosine_scheduler(start_val, end_val, total_epochs, 1)
         self.start_val = start_val
         self.end_val = end_val
+        self.p = p
 
         self.rrc = rrc
         self.transforms = transforms
 
     def forward(self, img):
-        for n in range(512):
+        flag = False
+        for _ in range(512):
             p1 = self.rrc.get_params(img, self.rrc.scale, self.rrc.ratio)
             p2 = self.rrc.get_params(img, self.rrc.scale, self.rrc.ratio)
 
+            if torch.rand(1) < self.p:
+                break
             if calc_iou(p1, p2) > self.schedule[self.epoch]:
                 continue
+            flag = True
             break
-        n += 1
+
         _, height, width = tf.get_dimensions(img)
         img1 = tf.resized_crop(img, *p1, self.rrc.size, self.rrc.interpolation, antialias=self.rrc.antialias)
         img2 = tf.resized_crop(img, *p2, self.rrc.size, self.rrc.interpolation, antialias=self.rrc.antialias)
@@ -69,7 +76,7 @@ class MSATransform(nn.Module):
         img1, out1 = self.apply_transforms(img1)
         img2, out2 = self.apply_transforms(img2)
 
-        params = [[height, width, *p1, n], *out1], [[height, width, *p2, n], *out2]
+        params = [[height, width, *p1, flag], *out1], [[height, width, *p2, flag], *out2]
 
         return [img1, img2], params
 

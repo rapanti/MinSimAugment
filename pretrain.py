@@ -96,7 +96,8 @@ def main(cfg):
         transforms.ToTensor(),
         transforms.Normalize(mean=mean, std=std)
     ])
-    msat = msatransform.MSATransform(rrc, cfg.epochs, cfg.start_val, cfg.end_val, transforms=transform)
+    msat = msatransform.MSATransform(
+        rrc, cfg.epochs, cfg.start_val, cfg.end_val, schedule=cfg.msat_schedule, transforms=transform, p=cfg.msat_prob)
     dataset, _ = data.make_dataset(cfg.data_path, cfg.dataset, True, msat)
 
     sampler = DistributedSampler(dataset)
@@ -261,6 +262,8 @@ def get_args_parser():
                    help="End value of the MSAT parameter")
     p.add_argument("--msat_schedule", type=str, choices=['linear', 'cosine'],
                    help="schedule type for MSAT value")
+    p.add_argument("--msat_prob", type=float,
+                   help="MSAT probability (default: 0.5)")
 
     # Misc
     p.add_argument('--fp16', default=True, type=utils.bool_flag,

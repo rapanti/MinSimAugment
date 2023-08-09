@@ -265,7 +265,7 @@ def get_args_parser():
                    help="Resize size of images before center-crop (default: 256)")
     p.add_argument('--crop_size', type=int,
                    help="Size of center-crop (default: 224)")
-    p.add_argument('--lars', default=True, type=utils.bool_flag,
+    p.add_argument('--lars', type=utils.bool_flag,
                    help="Whether or not to use LARS optimizer (default: True)")
 
     # additional configs:
