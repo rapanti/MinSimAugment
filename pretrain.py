@@ -97,7 +97,15 @@ def main(cfg):
         transforms.Normalize(mean=mean, std=std)
     ])
     msat = msatransform.MSATransform(
-        rrc, cfg.epochs, cfg.start_val, cfg.end_val, schedule=cfg.msat_schedule, transforms=transform, p=cfg.msat_prob)
+        rrc=rrc,
+        total_epochs=cfg.epochs,
+        warmup_epochs=cfg.warmup_epochs,
+        start_val=cfg.start_val,
+        end_val=cfg.end_val,
+        schedule=cfg.msat_schedule,
+        transforms=transform,
+        p=cfg.msat_prob
+    )
     dataset, _ = data.make_dataset(cfg.data_path, cfg.dataset, True, msat)
 
     sampler = DistributedSampler(dataset)
