@@ -99,7 +99,7 @@ def main(cfg):
     msat = msatransform.MSATransform(
         rrc=rrc,
         total_epochs=cfg.epochs,
-        warmup_epochs=cfg.warmup_epochs,
+        warmup_epochs=cfg.msat_warmup,
         start_val=cfg.start_val,
         end_val=cfg.end_val,
         schedule=cfg.msat_schedule,
