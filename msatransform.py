@@ -33,6 +33,7 @@ class MSATransform(nn.Module):
     def __init__(self,
                  rrc: RandomResizedCrop,
                  total_epochs: int,
+                 warmup_epochs: int = 0,
                  start_val: float = 0.5,
                  end_val: float = None,
                  schedule: str = 'linear',
@@ -46,9 +47,13 @@ class MSATransform(nn.Module):
         if end_val is None:
             end_val = start_val
         if schedule == 'linear':
-            self.schedule = np.linspace(start_val, end_val, total_epochs)
+            warmup = np.linspace(1, 1, warmup_epochs)
+            regular = np.linspace(start_val, end_val, total_epochs - warmup_epochs)
+            self.schedule = np.concatenate((warmup, regular))
         elif schedule == 'cosine':
-            self.schedule = cosine_scheduler(start_val, end_val, total_epochs, 1)
+            warmup = np.linspace(1, 1, warmup_epochs)
+            regular = cosine_scheduler(start_val, end_val, total_epochs - warmup_epochs, 1)
+            self.schedule = np.concatenate((warmup, regular))
         self.start_val = start_val
         self.end_val = end_val
         self.p = p

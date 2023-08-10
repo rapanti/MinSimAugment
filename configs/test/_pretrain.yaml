@@ -33,4 +33,5 @@ adv_metric_freq: 100
 start_val: 0.25
 end_val: 0.3
 msat_schedule: linear
+msat_warmup: 0
 msat_prob: 0.5

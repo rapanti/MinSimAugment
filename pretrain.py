@@ -262,6 +262,7 @@ def get_args_parser():
                    help="End value of the MSAT parameter")
     p.add_argument("--msat_schedule", type=str, choices=['linear', 'cosine'],
                    help="schedule type for MSAT value")
+    p.add_argument("--msat_warmup", type=int, help='number of warmup epochs that turns off MSAT')
     p.add_argument("--msat_prob", type=float,
                    help="MSAT probability (default: 0.5)")
 
