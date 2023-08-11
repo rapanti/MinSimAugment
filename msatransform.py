@@ -63,11 +63,13 @@ class MSATransform(nn.Module):
 
     def forward(self, img):
         flag = False
+        flag_rand = False
         for _ in range(512):
             p1 = self.rrc.get_params(img, self.rrc.scale, self.rrc.ratio)
             p2 = self.rrc.get_params(img, self.rrc.scale, self.rrc.ratio)
 
             if torch.rand(1) < self.p:
+                flag_rand = True
                 break
             if calc_iou(p1, p2) > self.schedule[self.epoch]:
                 continue
@@ -81,7 +83,7 @@ class MSATransform(nn.Module):
         img1, out1 = self.apply_transforms(img1)
         img2, out2 = self.apply_transforms(img2)
 
-        params = [[height, width, *p1, flag], *out1], [[height, width, *p2, flag], *out2]
+        params = [[height, width, *p1, flag, flag_rand], *out1], [[height, width, *p2, flag, flag_rand], *out2]
 
         return [img1, img2], params
 
