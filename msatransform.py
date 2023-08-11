@@ -38,7 +38,7 @@ class MSATransform(nn.Module):
                  end_val: float = None,
                  schedule: str = 'linear',
                  transforms: Compose = None,
-                 p: float = 0.5,
+                 p: float = 0.0,
                  ):
         super().__init__()
         self.epoch = 0

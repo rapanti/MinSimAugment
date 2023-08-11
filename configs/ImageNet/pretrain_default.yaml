@@ -19,7 +19,7 @@ start_val: 0.3
 end_val: null
 msat_schedule: linear
 msat_warmup: 0
-msat_prob: 0.5
+msat_prob: 0.0
 # Misc parameters
 data_path: null
 output_dir: null
