@@ -15,13 +15,9 @@ from omegaconf import OmegaConf
 from torch.utils.tensorboard import SummaryWriter
 
 import data
-import distributed as dist
-import optimizers
 import utils
-
-import resnet_cifar
-import resnet_imagenet
-import vision_transformer as vits
+from models import resnet, resnet_cifar, vision_transformer as vits
+from utils import distributed as dist, optimizers
 
 
 def main(cfg):
@@ -84,8 +80,8 @@ def main(cfg):
         model.fc = nn.Linear(embed_dim, cfg.num_labels)
     elif cfg.arch in resnet_cifar.__dict__.keys():
         model = resnet_cifar.__dict__[cfg.arch](num_classes=cfg.num_labels)
-    elif cfg.arch in resnet_imagenet.__dict__.keys():
-        model = resnet_imagenet.__dict__[cfg.arch](num_classes=cfg.num_labels)
+    elif cfg.arch in resnet.__dict__.keys():
+        model = resnet.__dict__[cfg.arch](num_classes=cfg.num_labels)
     else:
         print(f"Unknown architecture: {cfg.arch}")
         sys.exit(1)
@@ -112,14 +108,20 @@ def main(cfg):
 
     # infer learning rate
     init_lr = cfg.lr * cfg.batch_size / 256
-    if cfg.lars:
+    if cfg.optimizer == "lars":
         optimizer = optimizers.LARS(parameters, init_lr,
                                     momentum=cfg.momentum,
                                     weight_decay=cfg.weight_decay)
-    else:
+    elif cfg.optimizer == "sgd":
         optimizer = torch.optim.SGD(parameters, init_lr,
                                     momentum=cfg.momentum,
                                     weight_decay=cfg.weight_decay)
+    elif cfg.optimizer == "adamw":
+        optimizer = torch.optim.AdamW(parameters, init_lr,
+                                      weight_decay=cfg.weight_decay)
+    else:
+        raise ValueError(f"Unknown optimizer: {cfg.optimizer}")
+
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, cfg.epochs, eta_min=0)
 
     log_dir = os.path.join(cfg.output_dir, "tensorboard")
@@ -272,13 +274,13 @@ def get_args_parser():
     p.add_argument('-a', '--arch', type=str,
                    help="Name of architecture to train (default: vit_small)")
     p.add_argument('--img_size', type=int,
-                   help="Name of architecture to train (default: resnet50)")
+                   help="input images size (default: resnet50)")
     p.add_argument('--epochs', type=int,
-                   help='number of total epochs to run (default: 90)')
+                   help='number of total epochs to run (default: 100)')
     p.add_argument('-b', '--batch-size', type=int,
-                   help='total-batch-size (default: 4096)')
+                   help='total-batch-size (default: 1024)')
     p.add_argument('--lr', type=float,
-                   help='initial (base) learning rate (default: 0.1)')
+                   help='initial (base) learning rate (default: 0.001)')
     p.add_argument('--momentum', type=float,
                    help='momentum (default: 0.9)')
     p.add_argument('--wd', '--weight_decay', type=float, dest='weight_decay',
@@ -287,16 +289,16 @@ def get_args_parser():
                    help="Resize size of images before center-crop (default: 256)")
     p.add_argument('--crop_size', type=int,
                    help="Size of center-crop (default: 224)")
-    p.add_argument('--lars', default=True, type=utils.bool_flag,
-                   help="Whether or not to use LARS optimizer (default: True)")
+    p.add_argument('--optimizer', type=str, choices=['adamw', 'sgd', 'lars'],
+                   help="Optimizer (default: sqd)")
 
     # additional configs:
     p.add_argument('--pretrained', default="checkpoint.pth", type=str,
                    help="path to simsiam pretrained checkpoint (default: checkpoint.pth)")
     p.add_argument('--output_dir', default=".", type=str,
                    help='Path to save logs and checkpoints (default: .)')
-    p.add_argument('--ckp_key', default="model", type=str,
-                   help='Checkpoint key (default: model)')
+    p.add_argument('--ckp_key', default="teacher", type=str,
+                   help='Checkpoint key (default: teacher)')
     p.add_argument('--val_freq', default=1, type=int,
                    help="Validate model every x epochs (default: 1)")
     p.add_argument('--logger_freq', default=50, type=int,

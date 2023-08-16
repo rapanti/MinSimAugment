@@ -112,10 +112,7 @@ if __name__ == "__main__":
             raise ValueError(f"Dataset '{args.dataset}' has no default path. Specify path to dataset.")
 
     if slurm_args.partition is None:
-        if current_username == "rapanti":
-            slurm_args.partition = "mlhiwidlc_gpu-rtx2080-advanced"
-        else:
-            slurm_args.partition = "alldlc_gpu-rtx2080"
+        slurm_args.partition = "alldlc_gpu-rtx2080"
 
     # make sure that these arguments are the same
     eval_linear_args.arch = args.arch
@@ -131,8 +128,6 @@ if __name__ == "__main__":
                    f"-lr{args.lr}-wd{args.weight_decay}-out_dim{str(args.out_dim//1000)+'k'}-seed{args.seed}"
         output_dir = Path(exp_dir).joinpath(exp_name)
         output_dir.mkdir(parents=True, exist_ok=True)
-        args.output_dir = str(output_dir)
-        eval_linear_args.output_dir = str(output_dir)
 
         # Define master port (for preventing 'Address already in use error' when submitting more than 1 jobs on 1 node)
         master_port = find_free_port()

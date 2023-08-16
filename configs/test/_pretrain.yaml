@@ -1,16 +1,16 @@
 arch: vit_tiny
 batch_size: 256
 clip_grad: 3.0
-dataset: CIFAR10
+dataset: Test32
 drop_path_rate: 0.1
-epochs: 400
+epochs: 2
 freeze_last_layer: 1
 global_crops_scale:
 - 0.4
 - 1.0
 global_crops_size: 32
 img_size: 32
-local_crops_number: 4
+local_crops_number: 8
 local_crops_scale:
 - 0.05
 - 0.4
@@ -19,18 +19,21 @@ lr: 0.0005
 min_lr: 1.0e-06
 momentum_teacher: 0.996
 norm_last_layer: true
-num_crops: 4
 optimizer: adamw
 out_dim: 4096
 patch_size: 4
-select_fn: cross
 teacher_temp: 0.04
 weight_decay: 0.04
 use_bn_in_head: false
 warmup_teacher_temp: 0.04
 warmup_teacher_temp_epochs: 0
 weight_decay_end: 0.4
-warmup_epochs: 10
+warmup_epochs: 0
+# MinSim
+limit_comparisons: 32
+num_global_crops_loader: 4
+num_local_crops_loader: 16
+select_fn: cross
 # Misc parameters
 data_path: ../datasets/CIFAR10
 output_dir: exp

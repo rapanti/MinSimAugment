@@ -18,17 +18,13 @@ from omegaconf import OmegaConf
 from torch.utils.data import DistributedSampler, DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
-import custom_transform
+from data import custom_transform
 import data
-import distributed as dist
-import optimizers
-import select_crops
 import utils
-from utils_dino import MultiCropWrapper, DINOHead, DINOLoss
-
-import resnet_cifar
-import resnet_imagenet
-import vision_transformer as vits
+from minsim import MinSim
+from models import resnet, resnet_cifar, vision_transformer as vits
+from utils import distributed as dist, optimizers
+from utils.dino import MultiCropWrapper, DINOHead, DINOLoss
 
 
 def custom_collate(batch):
@@ -80,7 +76,8 @@ def main(cfg):
         mean=mean,
         std=std,
     )
-    two_crops_transform = data.MultiCropsTransform(gt1, gt2, lt, cfg.num_crops, cfg.local_crops_number)
+    two_crops_transform = data.MultiCropsTransform(gt1, gt2, lt,
+                                                   cfg.num_global_crops_loader, cfg.num_local_crops_loader)
     dataset, _ = data.make_dataset(cfg.data_path, cfg.dataset, True, two_crops_transform)
 
     sampler = DistributedSampler(dataset)
@@ -109,9 +106,9 @@ def main(cfg):
         student = resnet_cifar.__dict__[cfg.arch]()
         teacher = resnet_cifar.__dict__[cfg.arch]()
         embed_dim = student.fc.weight.shape[1]
-    elif cfg.arch in resnet_imagenet.__dict__.keys():
-        student = resnet_imagenet.__dict__[cfg.arch]()
-        teacher = resnet_imagenet.__dict__[cfg.arch]()
+    elif cfg.arch in resnet.__dict__.keys():
+        student = resnet.__dict__[cfg.arch]()
+        teacher = resnet.__dict__[cfg.arch]()
         embed_dim = student.fc.weight.shape[1]
     else:
         print(f"Unknown architecture: {cfg.arch}")
@@ -152,7 +149,7 @@ def main(cfg):
     # ============ preparing loss ... ============
     dino_loss = DINOLoss(
         cfg.out_dim,
-        4,  # total number of crops = 2 global crops + local_crops_number
+        2 + cfg.local_crops_number,  # total number of crops = 2 global crops + local_crops_number
         cfg.warmup_teacher_temp,
         cfg.teacher_temp,
         cfg.warmup_teacher_temp_epochs,
@@ -191,7 +188,9 @@ def main(cfg):
                                                cfg.epochs, len(data_loader))
     print(f"Loss, optimizer and schedulers ready.")
 
-    select_fn = select_crops.names[cfg.select_fn]
+    select_fn = MinSim(cfg.select_fn, student, teacher, dino_loss, fp16,
+                       cfg.num_global_crops_loader, cfg.num_local_crops_loader,
+                       cfg.local_crops_number, cfg.limit_comparisons)
 
     # ============ optionally resume training ... ============
     to_restore = {"epoch": 0, "total_time": 0}
@@ -265,7 +264,7 @@ def train_one_epoch(student, teacher, teacher_without_ddp, dino_loss, data_loade
         # move images to gpu
         images = [im.cuda(non_blocking=True) for im in images]
         # MinSim
-        images, selected, sample_loss = select_fn(images, student, teacher, dino_loss, fp16, cfg.num_crops, epoch)
+        images, selected, sample_loss = select_fn(images, epoch)
 
         # teacher and student forward passes + compute dino loss
         with torch.cuda.amp.autocast(fp16 is not None):
@@ -405,8 +404,15 @@ def get_args_parser():
                    help="Size of local crops (default: 96)")
 
     # MinSim parameters:
-    p.add_argument("--num_crops", type=int, help="Number of crops")
-    p.add_argument("--select_fn", type=str, choices=select_crops.names)
+    p.add_argument("--select_fn", type=str, choices=["identity", "cross"],
+                   help="Select function for MinSim (default: identity)")
+    p.add_argument('--num_global_crops_loader', type=int,
+                   help="Number of global views to generate per image in the loader. (default: 2)")
+    p.add_argument('--num_local_crops_loader', type=int,
+                   help="Number of local views to generate per image in the loader. (default: 8)")
+    p.add_argument('--limit_comparisons', type=int,
+                   help="""Limit the number of comparisons; implemented as number of combinations for local crops.
+                   Default is 0, which turns off the limit. (default: 0)""")
 
     # Misc
     p.add_argument('--dataset', type=str, default="ImageNet",
@@ -429,7 +435,7 @@ def get_args_parser():
                    help="Print progress every x iterations (default: 10)")
     p.add_argument("--logger_freq", default=50, type=int,
                    help="Log progress every x iterations to tensorboard (default: 50)")
-    p.add_argument("--use_adv_metric", default=False, type=utils.bool_flag,
+    p.add_argument("--use_adv_metric", default=True, type=utils.bool_flag,
                    help="Log advanced metrics: transforms params, crop selection, sample-loss, ... (default: False)")
     p.add_argument("--adv_metric_freq", default=100, type=int,
                    help="Log advanced metrics every x iterations (default: 100)")

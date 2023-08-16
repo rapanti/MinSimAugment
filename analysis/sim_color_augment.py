@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 
 import builder
 from data import MultiCropsTransform, make_pretrain_transform
-from resnet_imagenet import resnet50
+from models.resnet import resnet50
 
 
 if __name__ == "__main__":

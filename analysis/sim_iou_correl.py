@@ -1,5 +1,4 @@
-import numpy as np
-from scipy.stats import pearsonr, spearmanr
+from scipy.stats import pearsonr
 import torch
 import torch.nn as nn
 from torchvision.datasets import ImageFolder
@@ -8,7 +7,7 @@ from torchvision.transforms import ToTensor, Normalize
 import matplotlib.pyplot as plt
 
 import builder
-from resnet_imagenet import resnet50
+from models.resnet import resnet50
 
 import transforms_p as tp
 
