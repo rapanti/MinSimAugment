@@ -278,9 +278,9 @@ def get_args_parser():
                    help="Print progress every x iterations (default: 10)")
     p.add_argument("--logger_freq", default=50, type=int,
                    help="Log progress every x iterations to tensorboard (default: 50)")
-    p.add_argument("--use_adv_metric", default=False, type=utils.bool_flag,
+    p.add_argument("--use_adv_metric", default=True, type=utils.bool_flag,
                    help="Log advanced metrics: transforms params, crop selection, sample-loss, ... (default: False)")
-    p.add_argument("--adv_metric_freq", default=100, type=int,
+    p.add_argument("--adv_metric_freq", default=10, type=int,
                    help="Log advanced metrics every x iterations (default: 100)")
 
     return p
