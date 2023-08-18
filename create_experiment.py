@@ -2,7 +2,6 @@ import argparse
 from pathlib import Path
 import subprocess
 import sys
-import getpass
 
 from utils import find_free_port
 from omegaconf import OmegaConf
@@ -19,7 +18,7 @@ if __name__ == "__main__":
                               help="The name of the compute partition to use")
     slurm_parser.add_argument("--array", default=0, type=int,
                               help="If n > 0 submits a job array n+1 jobs")
-    slurm_parser.add_argument("--time", default="23:59:59", type=str)
+    slurm_parser.add_argument("--time", default="48:00:00", type=str)
     slurm_parser.add_argument("--head", default="dino", type=str)
     slurm_parser.add_argument("--descr", default=None, type=str)
     slurm_parser.add_argument("--exp_dir", default=None, type=str)
@@ -27,9 +26,8 @@ if __name__ == "__main__":
     pretrain_parser = pretrain_get_args_parser()
     eval_linear_parser = eval_linear_get_args_parser()
 
-    current_username = getpass.getuser()
-    conda_env_name = "torch" if current_username == "rapanti" else "minsim2"
-    profile_path = "~/.profile" if current_username == "rapanti" else "/home/ferreira/.profile"
+    conda_env_name = "minsim"
+    profile_path = "~/.bashrc"
 
     if len(sys.argv) > 1:
         slurm_args, rest = slurm_parser.parse_known_args()
@@ -98,25 +96,13 @@ if __name__ == "__main__":
                     eval_linear_args[arg] = value
             break
 
-    if slurm_args.exp_dir is None:
-        if current_username == "rapanti":
-            exp_dir = "/work/dlclarge2/rapanti-MinSimAugment/experiments"
-        else:
-            exp_dir = "/work/dlclarge1/ferreira-simsiam/minsim_experiments" \
+    exp_dir = "/gpfs/bwfor/work/ws/fr_ir46-MinSim/experiments" if slurm_args.exp_dir is None else slurm_args.exp_dir
 
     if args.data_path is None:
-        if args.dataset == "CIFAR10":
-            if current_username == "rapanti":
-                args.data_path = "/work/dlclarge2/rapanti-MinSimAugment/datasets/CIFAR10"
-            else:
-                args.data_path = "/work/dlclarge1/ferreira-simsiam/simsiam/datasets/CIFAR10"
-        elif args.dataset == "ImageNet":
-            args.data_path = "/data/datasets/ImageNet/imagenet-pytorch"
-        else:
-            raise ValueError(f"Dataset '{args.dataset}' has no default path. Specify path to dataset.")
+        args.data_path = "/gpfs/bwfor/work/ws/fr_ir46-MinSim/data/imagenet"
 
     if slurm_args.partition is None:
-        slurm_args.partition = "alldlc_gpu-rtx2080"
+        slurm_args.partition = "single"
 
     for seed in seeds:
         args.seed = seed
@@ -159,11 +145,15 @@ if __name__ == "__main__":
         copy_msg = subprocess.call(["cp", "-r", ".", code_dir])
 
         slurm_file = slurm_dir.joinpath("%A.%a.%N.txt")
+        ntasks = slurm_args.gpus * 8
+        mem = slurm_args.gpus * 32
         sbatch = [
             "#!/bin/bash",
             f"#SBATCH -p {slurm_args.partition}",
             f"#SBATCH -t {slurm_args.time}",
+            f"#SBATCH --ntasks-per-node={ntasks}",
             f"#SBATCH --gres=gpu:{slurm_args.gpus}",
+            f"#SBATCH --mem={mem}G",
             f"#SBATCH -J {exp_name}",
             f"#SBATCH -o {slurm_file}",
             f"#SBATCH -e {slurm_file}",
@@ -171,6 +161,8 @@ if __name__ == "__main__":
             'echo "Workingdir: $PWD"',
             'echo "Started at $(date)"',
             'echo "Running job $SLURM_JOB_NAME with given JID $SLURM_JOB_ID on queue $SLURM_JOB_PARTITION"\n',
+            "module load devel/cuda",
+            "module load 'devel/miniconda/3'",
             f"source {profile_path}",
             f"conda activate {conda_env_name}"
         ]
