@@ -1,24 +1,30 @@
+# model parameters
 arch: vit_tiny
+img_size: 224
+patch_size: 16
+
+# training/optimization parameters
 avgpool: false
-batch_size: 256
-crop_size: 32  # 224
-dataset: Test32  # ImageNet
-epochs: 2
-img_size: 32
-lr: 1.0
+batch_size: 128
+epochs: 3
+lr: 0.001
 momentum: 0.9
 n_last_blocks: 4
 optimizer: sgd
-patch_size: 4
-resize_size: 36  # 256
 weight_decay: 0.0
+
+# augmentation parameters
+crop_size: 224
+resize_size: 256
+
 # misc
-ckp_key: teacher
-data_path: ../datasets/CIFAR10  # /data/datasets/ImageNet/imagenet-pytorch
-dist_backend: gloo  # gloo
+dataset: Test224
+data_path: path/to/dataset
+dist_backend: nccl
 dist_url: env://
-logger_freq: 50
-num_workers: 8
-output_dir: exp
+ckp_key: teacher
 pretrained: exp/checkpoint.pth
+log_freq: 50
+num_workers: 8
+output_dir: .
 val_freq: 1

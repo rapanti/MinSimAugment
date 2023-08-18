@@ -72,7 +72,7 @@ def make_pretrain_transform(
 def make_classification_train_transform(
         crop_size: int = 224,
         crop_scale: Tuple[float, float] = (0.08, 1.0),
-        interpolation: InterpolationMode = InterpolationMode.BILINEAR,
+        interpolation: InterpolationMode = InterpolationMode.BICUBIC,
         hflip_prob: float = 0.5,
         mean: Sequence[float] = IMAGENET_DEFAULT_MEAN,
         std: Sequence[float] = IMAGENET_DEFAULT_STD,
@@ -89,7 +89,7 @@ def make_classification_train_transform(
 def make_classification_val_transform(
         resize_size: int = 256,
         crop_size: int = 224,
-        interpolation: InterpolationMode = InterpolationMode.BILINEAR,
+        interpolation: InterpolationMode = InterpolationMode.BICUBIC,
         mean: Sequence[float] = IMAGENET_DEFAULT_MEAN,
         std: Sequence[float] = IMAGENET_DEFAULT_STD,
 ):

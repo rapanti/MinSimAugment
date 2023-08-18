@@ -20,8 +20,8 @@ if __name__ == "__main__":
     slurm_parser.add_argument("--array", default=0, type=int,
                               help="If n > 0 submits a job array n+1 jobs")
     slurm_parser.add_argument("--time", default="23:59:59", type=str)
-    slurm_parser.add_argument("--head", default="dino-minsim", type=str)
-    slurm_parser.add_argument("--descr", default="baseline", type=str)
+    slurm_parser.add_argument("--head", default="dino", type=str)
+    slurm_parser.add_argument("--descr", default=None, type=str)
     slurm_parser.add_argument("--exp_dir", default=None, type=str)
 
     pretrain_parser = pretrain_get_args_parser()
@@ -33,6 +33,8 @@ if __name__ == "__main__":
 
     if len(sys.argv) > 1:
         slurm_args, rest = slurm_parser.parse_known_args()
+        assert slurm_args.descr is not None, "Nasty! Parameter '--descr' empty. Add a meaningful description."
+
         pretrain_args = pretrain_parser.parse_args(rest)
         path_to_def = f"configs/{pretrain_args.dataset}/pretrain_default.yaml"
         args = OmegaConf.load(path_to_def)
@@ -43,6 +45,7 @@ if __name__ == "__main__":
         seeds = [args.seed]
         path_to_def = f"configs/{pretrain_args.dataset}/eval_linear_default.yaml"
         eval_linear_args = OmegaConf.load(path_to_def)
+
     else:
         while True:
             print("Specify slurm parameter: ENTER for default; -h for help")
@@ -51,6 +54,7 @@ if __name__ == "__main__":
                 slurm_parser.print_usage()
                 continue
             slurm_args = slurm_parser.parse_args(line.split())
+            assert slurm_args.descr is not None, "Nasty! Parameter '--descr' empty. Add a meaningful description."
             break
 
         while True:
@@ -114,17 +118,14 @@ if __name__ == "__main__":
     if slurm_args.partition is None:
         slurm_args.partition = "alldlc_gpu-rtx2080"
 
-    # make sure that these arguments are the same
-    eval_linear_args.arch = args.arch
-    eval_linear_args.dataset = args.dataset
-    eval_linear_args.data_path = args.data_path
-
     for seed in seeds:
         args.seed = seed
         ps = f"_p{args.patch_size}" if "vit" in args.arch else ""
+        ncrops = f"{args.num_global_crops_loader}_{args.num_local_crops_loader}"
+
         exp_name = f"{slurm_args.head}-{slurm_args.descr}" \
                    f"-{args.arch+ps}-{args.dataset}-ep{args.epochs}-bs{args.batch_size}" \
-                   f"-select_{args.select_fn}-ncrops{args.num_crops}" \
+                   f"-select_{args.select_fn}-ncrops{ncrops}" \
                    f"-lr{args.lr}-wd{args.weight_decay}-out_dim{str(args.out_dim//1000)+'k'}-seed{args.seed}"
         output_dir = Path(exp_dir).joinpath(exp_name)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -132,7 +133,15 @@ if __name__ == "__main__":
         # Define master port (for preventing 'Address already in use error' when submitting more than 1 jobs on 1 node)
         master_port = find_free_port()
         args.dist_url = "tcp://localhost:" + str(master_port)
+
+        # make sure that these arguments are the same
+        eval_linear_args.arch = args.arch
+        eval_linear_args.dataset = args.dataset
+        eval_linear_args.data_path = args.data_path
         eval_linear_args.dist_url = args.dist_url
+        eval_linear_args.dist_backend = args.dist_backend
+        eval_linear_args.num_workers = args.num_workers
+        eval_linear_args.output_dir = args.output_dir
 
         print(f"using {args.dist_url=}")
         print(f"Experiment: {output_dir}")

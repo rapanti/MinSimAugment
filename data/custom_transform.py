@@ -2,8 +2,7 @@ from typing import Sequence, Tuple
 
 import torch
 import torchvision.transforms.functional as F
-from torchvision.transforms import ColorJitter, GaussianBlur, InterpolationMode, \
-    RandomGrayscale, RandomResizedCrop, RandomSolarize
+from torchvision.transforms import ColorJitter, GaussianBlur, InterpolationMode, RandomResizedCrop
 
 IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
@@ -42,14 +41,14 @@ class TransformParams(object):
         img = F.resized_crop(img, i, j, h, w, self.rrc.size, self.rrc.interpolation, antialias=self.rrc.antialias)
         params = [(height, width, i, j, h, w)]
 
-        # RandomHorizontalFlip
+        # HorizontalFlip
         if torch.rand(1) < self.hflip_prob:
             img = F.hflip(img)
-            params.append(True)
+            params.append(1)
         else:
-            params.append(False)
+            params.append(0)
 
-        # RandomApply-ColorJitter
+        # ColorJitter
         if torch.rand(1) < self.colorj_prob:
             fn_idx, brightness_factor, contrast_factor, saturation_factor, hue_factor = \
                 self.color_jitter.get_params(self.color_jitter.brightness, self.color_jitter.contrast,
@@ -63,32 +62,32 @@ class TransformParams(object):
                     img = F.adjust_saturation(img, saturation_factor)
                 elif fn_id == 3 and hue_factor is not None:
                     img = F.adjust_hue(img, hue_factor)
-            params.append((brightness_factor, contrast_factor, saturation_factor, hue_factor, fn_idx.tolist()))
+            params.append((fn_idx.tolist(), brightness_factor, contrast_factor, saturation_factor, hue_factor))
         else:
-            params.append(False)
+            params.append(([0, 1, 2, 3], 1, 1, 1, 0))
 
-        # RandomGrayscale
+        # Grayscale
         if torch.rand(1) < self.gray_prob:
             num_output_channels, _, _ = F.get_dimensions(img)
             img = F.rgb_to_grayscale(img, num_output_channels=num_output_channels)
-            params.append(True)
+            params.append(1)
         else:
-            params.append(False)
+            params.append(0)
 
-        # RandomApply-GaussianBlur
+        # GaussianBlur
         if torch.rand(1) < self.blur_prob:
             sigma = self.blur.get_params(self.blur.sigma[0], self.blur.sigma[1])
             img = F.gaussian_blur(img, self.blur.kernel_size, [sigma, sigma])
             params.append(sigma)
         else:
-            params.append(False)
+            params.append(0)
 
-        # RandomSolarize
+        # Solarize
         if torch.rand(1) < self.solarize_prob:
             img = F.solarize(img, 128)
-            params.append(True)
+            params.append(1)
         else:
-            params.append(False)
+            params.append(0)
 
         img = F.to_tensor(img)
         img = F.normalize(img, self.mean, self.std, False)

@@ -216,7 +216,7 @@ def train(loader, model, criterion, optimizer, epoch, cfg, board):
         metric_logger.update(acc1=acc1[0])
         metric_logger.update(acc5=acc5[0])
 
-        if dist.is_main_process() and it % cfg.logger_freq:
+        if dist.is_main_process() and it % cfg.log_freq:
             board.add_scalar(tag="eval acc1", scalar_value=acc1, global_step=it)
             board.add_scalar(tag="eval loss", scalar_value=loss.item(), global_step=it)
             board.add_scalar(tag="eval lr", scalar_value=optimizer.param_groups[0]["lr"], global_step=it)
@@ -266,49 +266,60 @@ def validate(loader, model, criterion, cfg):
 
 
 def get_args_parser():
-    p = argparse.ArgumentParser(description='PyTorch Eval-Linear ImageNet', add_help=False)
-    p.add_argument('--dataset', default="ImageNet", type=str,
-                   help='Specify dataset. (default: ImageNet)')
-    p.add_argument('--data_path', type=str,
-                   help='(root) path to dataset')
+    p = argparse.ArgumentParser(description='Linear-Eval for DINO', add_help=False)
+    # model parameters
     p.add_argument('-a', '--arch', type=str,
-                   help="Name of architecture to train (default: vit_small)")
+                   help="Model architecture (default: vit_small)")
     p.add_argument('--img_size', type=int,
-                   help="input images size (default: resnet50)")
-    p.add_argument('--epochs', type=int,
-                   help='number of total epochs to run (default: 100)')
+                   help="input image size (default: 224)")
+    p.add_argument('--patch_size', type=int,
+                   help="patch resolution of the model (default: 16)")
+
+    # training parameters
+    p.add_argument('--avgpool', type=utils.bool_flag,
+                   help="Whether to concatenate the global average pooled features to the [CLS] token (default: False)")
     p.add_argument('-b', '--batch-size', type=int,
                    help='total-batch-size (default: 1024)')
+    p.add_argument('--epochs', type=int,
+                   help='number of total epochs to run (default: 100)')
     p.add_argument('--lr', type=float,
                    help='initial (base) learning rate (default: 0.001)')
     p.add_argument('--momentum', type=float,
                    help='momentum (default: 0.9)')
-    p.add_argument('--wd', '--weight_decay', type=float, dest='weight_decay',
-                   help='weight decay (default: 0.)')
-    p.add_argument('--resize_size', type=int,
-                   help="Resize size of images before center-crop (default: 256)")
-    p.add_argument('--crop_size', type=int,
-                   help="Size of center-crop (default: 224)")
+    p.add_argument('--n_last_blocks', type=int,
+                   help="Concatenate [CLS] tokens for the 'n' last blocks. (default: 4)")
     p.add_argument('--optimizer', type=str, choices=['adamw', 'sgd', 'lars'],
                    help="Optimizer (default: sqd)")
+    p.add_argument('--wd', '--weight_decay', type=float, dest='weight_decay',
+                   help='weight decay (default: 0.)')
 
-    # additional configs:
-    p.add_argument('--pretrained', default="checkpoint.pth", type=str,
-                   help="path to simsiam pretrained checkpoint (default: checkpoint.pth)")
-    p.add_argument('--output_dir', default=".", type=str,
-                   help='Path to save logs and checkpoints (default: .)')
-    p.add_argument('--ckp_key', default="teacher", type=str,
-                   help='Checkpoint key (default: teacher)')
-    p.add_argument('--val_freq', default=1, type=int,
-                   help="Validate model every x epochs (default: 1)")
-    p.add_argument('--logger_freq', default=50, type=int,
-                   help="Log progress every x iterations to tensorboard (default: 50)")
-    p.add_argument('--dist-url', default="env://", type=str,
+    # augmentation parameters
+    p.add_argument('--crop_size', type=int,
+                   help="Size of center-crop (default: 224)")
+    p.add_argument('--resize_size', type=int,
+                   help="Resize size of images before center-crop (default: 256)")
+
+    # misc parameters
+    p.add_argument('--dataset', type=str,
+                   help='Specify dataset. (default: ImageNet)')
+    p.add_argument('--data_path', type=str,
+                   help='(root) path to dataset')
+    p.add_argument('--dist-url', type=str,
                    help="url used to set up distributed training (default: env://)")
-    p.add_argument('--dist-backend', default="nccl", type=str,
+    p.add_argument('--dist-backend', type=str,
                    help="distributed backend (default: nccl)")
-    p.add_argument('--num_workers', default=8, type=int,
+    p.add_argument('--ckp_key', type=str,
+                   help='Checkpoint key (default: teacher)')
+    p.add_argument('--pretrained', type=str,
+                   help="path to simsiam pretrained checkpoint (default: checkpoint.pth)")
+    p.add_argument('--output_dir', type=str,
+                   help='Path to save logs and checkpoints (default: .)')
+    p.add_argument('--log_freq', type=int,
+                   help="Log progress every x iterations to tensorboard (default: 50)")
+    p.add_argument('--num_workers', type=int,
                    help="number of data loading workers (default: 8)")
+    p.add_argument('--val_freq', type=int,
+                   help="Validate model every x epochs (default: 1)")
 
     return p
 

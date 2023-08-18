@@ -36,8 +36,7 @@ def custom_collate(batch):
 
 
 def main(cfg):
-    dist.init_distributed_mode(cfg)
-    utils.fix_random_seeds(cfg.seed)
+    dist.init_distributed_mode(cfg) if not dist.is_enabled() else None
     cudnn.benchmark = True
 
     print(f"git:\n  {utils.get_sha()}\n")
@@ -81,7 +80,7 @@ def main(cfg):
     dataset, _ = data.make_dataset(cfg.data_path, cfg.dataset, True, two_crops_transform)
 
     sampler = DistributedSampler(dataset)
-    batch_size_per_gpu = (cfg.batch_size // cfg.grad_accum_steps) // dist.get_world_size()
+    batch_size_per_gpu = cfg.batch_size // cfg.grad_accum_steps // dist.get_world_size()
     data_loader = DataLoader(
         dataset,
         sampler=sampler,
@@ -251,11 +250,11 @@ def train_one_epoch(student, teacher, teacher_without_ddp, dino_loss, data_loade
     metrics["epoch"] = epoch
     metric_logger = utils.MetricLogger(delimiter=" ")
     header = 'Epoch: [{}/{}]'.format(epoch, cfg.epochs)
-    loss_accum = torch.zeros(1, device=student.device)
+    total_loss = 0
     for it, (images, params) in enumerate(metric_logger.log_every(data_loader, 10, header)):
         # update weight decay and learning rate according to their schedule
         it = len(data_loader) * epoch + it  # global training iteration
-        do_optimizer_step = not (it + 1) % cfg.grad_accum_steps
+
         for i, param_group in enumerate(optimizer.param_groups):
             param_group["lr"] = lr_schedule[it]
             if i == 0:  # only the first group is regularized
@@ -270,8 +269,9 @@ def train_one_epoch(student, teacher, teacher_without_ddp, dino_loss, data_loade
         with torch.cuda.amp.autocast(fp16 is not None):
             teacher_output = teacher(images[:2])  # only the 2 global views pass through the teacher
             student_output = student(images)
-            loss = dino_loss(student_output, teacher_output, epoch) / cfg.grad_accum_steps
-            loss_accum.add_(loss.detach())
+            loss = dino_loss(student_output, teacher_output, epoch)
+            loss /= cfg.grad_accum_steps
+            total_loss += loss.detach()
 
         if not math.isfinite(loss.item()):
             print("Loss is {}, stopping training".format(loss.item()), force=True)
@@ -280,7 +280,7 @@ def train_one_epoch(student, teacher, teacher_without_ddp, dino_loss, data_loade
         # backpropagation
         loss.backward() if fp16 is None else fp16.scale(loss).backward()
 
-        if do_optimizer_step:
+        if not (it + 1) % cfg.grad_accum_steps:
             grad_norms = None
             if fp16 is None:
                 if cfg.clip_grad:
@@ -307,13 +307,13 @@ def train_one_epoch(student, teacher, teacher_without_ddp, dino_loss, data_loade
             torch.cuda.synchronize()
 
             # logging
-            metric_logger.update(loss=loss_accum.item())
+            metric_logger.update(loss=total_loss.item())
             metric_logger.update(lr=optimizer.param_groups[0]["lr"])
             metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])
 
-            metrics["loss"].append(loss_accum.item())
-            metrics["lr"].append(optimizer.param_groups[0]["lr"])
-            metrics["param_norms"].append(grad_norms.item())
+            metrics["training loss"].append(total_loss.item())
+            metrics["training lr"].append(optimizer.param_groups[0]["lr"])
+            metrics["training grad-norms"].append(grad_norms.item())
             if dist.is_main_process():
                 log_step = it // cfg.grad_accum_steps
                 if cfg.use_adv_metric and not log_step % cfg.adv_metric_freq:
@@ -321,13 +321,13 @@ def train_one_epoch(student, teacher, teacher_without_ddp, dino_loss, data_loade
                     metrics["params"].append(params)
                     metrics["sample-loss"].append(sample_loss.tolist())
 
-                if not log_step % cfg.logger_freq:
-                    board.add_scalar("training loss", loss_accum.item(), it)
+                if not log_step % cfg.log_freq:
+                    board.add_scalar("training loss", total_loss.item(), it)
                     board.add_scalar("training lr", optimizer.param_groups[0]["lr"], it)
                     board.add_scalar("training wd", optimizer.param_groups[0]["weight_decay"], it)
                     board.add_scalar("training grad-norms", grad_norms.item(), it)
 
-            loss_accum.zero_()
+            total_loss = 0
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
@@ -336,14 +336,14 @@ def train_one_epoch(student, teacher, teacher_without_ddp, dino_loss, data_loade
 
 
 def get_args_parser():
-    p = argparse.ArgumentParser("SimSiam", description='Pytorch Pretraining on ImageNet', add_help=False)
+    p = argparse.ArgumentParser("DINO", description='Pretraining for DINO', add_help=False)
 
     # Model parameters
     p.add_argument('-a', '--arch', type=str,
                    choices=["vit_tiny", "vit_small", "vit_base",
                             "resnet18", "resnet34", "resnet50", "resnet101", "resnet152",
                             "resnet18_cifar", "resnet34_cifar", "resnet50_cifar", "resnet101_cifar", "resnet152_cifar"],
-                   help="Name of architecture to train (default: vit_small)")
+                   help="Model architecture (default: vit_small)")
     p.add_argument('--img_size', type=int,
                    help="The standard input size. (default: 224)")
     p.add_argument('--patch_size', type=int,
@@ -366,7 +366,7 @@ def get_args_parser():
                    help="Number of warmup epochs for the teacher temperature (default: 0).")
 
     # Training/Optimization parameters
-    p.add_argument('--fp16', default=True, type=utils.bool_flag,
+    p.add_argument('--fp16', type=utils.bool_flag,
                    help="Whether or not to use half precision for training. (default: True)")
     p.add_argument('--weight_decay', type=float,
                    help="Initial value of the weight decay. (default: 0.04)")
@@ -419,28 +419,29 @@ def get_args_parser():
                    help='Specify dataset (default: ImageNet)')
     p.add_argument('--data_path', type=str,
                    help='(root) path to dataset')
-    p.add_argument('--output_dir', type=str, default='.',
-                   help='Path to save logs and checkpoints.')
-    p.add_argument('--saveckp_freq', default=0, type=int,
-                   help='Save checkpoint every x epochs.')
-    p.add_argument('--seed', default=0, type=int,
-                   help='Random seed.')
-    p.add_argument('--num_workers', default=8, type=int,
-                   help='Number of data loading workers per GPU.')
-    p.add_argument("--dist_backend", default="nccl", type=str,
+    p.add_argument("--grad_accum_steps", type=int,
+                   help="Gradient accumulation. Effective batch size is given batch size (default: 1)"
+                        "batch size per gpu = batch_size / grad_accum_steps / num_gpus")
+    p.add_argument('--output_dir', type=str,
+                   help='Path to save logs and checkpoints. (default: .)')
+    p.add_argument('--saveckp_freq', type=int,
+                   help='Save checkpoint every x epochs. (default: 0)')
+    p.add_argument('--seed', type=int,
+                   help='Random seed. (default: 0)')
+    p.add_argument('--num_workers', type=int,
+                   help='Number of data loading workers per GPU. (default: 8)')
+    p.add_argument("--dist_backend", type=str,
                    help="distributed backend (default: nccl)")
-    p.add_argument("--dist_url", default="env://", type=str,
-                   help="url used to set up distributed training")
-    p.add_argument("--print_freq", default=10, type=int,
+    p.add_argument("--dist_url", type=str,
+                   help="url used to set up distributed training (default: env://)")
+    p.add_argument("--print_freq", type=int,
                    help="Print progress every x iterations (default: 10)")
-    p.add_argument("--logger_freq", default=50, type=int,
+    p.add_argument("--log_freq", type=int,
                    help="Log progress every x iterations to tensorboard (default: 50)")
-    p.add_argument("--use_adv_metric", default=True, type=utils.bool_flag,
-                   help="Log advanced metrics: transforms params, crop selection, sample-loss, ... (default: False)")
-    p.add_argument("--adv_metric_freq", default=100, type=int,
-                   help="Log advanced metrics every x iterations (default: 100)")
-    p.add_argument("--grad_accum_steps", default=1, type=int,
-                   help="Gradient accumulation. Effective BS = batch_size * grad_accum_steps.")
+    p.add_argument("--use_adv_metric", type=utils.bool_flag,
+                   help="Log advanced metrics: transforms params, crop selection, sample-loss, ... (default: True)")
+    p.add_argument("--adv_metric_freq", type=int,
+                   help="Log advanced metrics every x iterations (default: 10)")
     return p
 
 
