@@ -269,6 +269,8 @@ def get_args_parser():
     # parameters for VitS
     p.add_argument('--patch_size', type=int, default=16,
                    help="Size in pixels of input square patches - default 16 (for 16x16 patches).")
+    p.add_argument('--drop_path_rate', type=float,
+                   help="stochastic depth rate. (default: 0.1)")
 
     # data augmentation parameters:
     p.add_argument("--crop_size", type=int,
