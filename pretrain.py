@@ -243,6 +243,9 @@ def get_args_parser():
     p.add_argument('--data_path', type=str,
                    help='(root) path to dataset')
     p.add_argument('-a', '--arch', type=str,
+                   choices=["vit_tiny", "vit_small", "vit_base",
+                            "resnet18", "resnet34", "resnet50", "resnet101", "resnet152",
+                            "resnet18_cifar", "resnet34_cifar", "resnet50_cifar", "resnet101_cifar", "resnet152_cifar"],
                    help="Name of architecture to train (default: resnet50)")
     p.add_argument('--epochs', type=int,
                    help='number of total epochs to run (default: 100)')
@@ -262,6 +265,11 @@ def get_args_parser():
                    help='hidden dimension of the predictor (default: 512)')
     p.add_argument('--fix_pred_lr', type=utils.bool_flag,
                    help='Fix learning rate for the predictor (default: True)')
+
+    # parameters for VitS
+    p.add_argument('--patch_size', type=int, default=16,
+                   help="Size in pixels of input square patches - default 16 (for 16x16 patches).")
+
 
     # data augmentation parameters:
     p.add_argument("--crop_size", type=int,
