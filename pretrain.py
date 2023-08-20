@@ -43,13 +43,12 @@ def main(cfg):
     print(OmegaConf.to_yaml(cfg))
 
     if cfg.arch in vits.__dict__.keys():
-        arch = vits.__dict__[cfg.arch](
-            img_size=cfg.crop_size,
-            patch_size=cfg.patch_size,
-            drop_path_rate=cfg.drop_path_rate,
-        )
+        arch = vits.__dict__[cfg.arch]
         proj_layer = 3
         encoder_params = {
+            "img_size": cfg.crop_size,
+            "patch_size": cfg.patch_size,
+            "drop_path_rate": cfg.drop_path_rate,
             "num_classes": cfg.dim
         }
     elif cfg.arch in resnet_cifar.__dict__.keys():
