@@ -18,14 +18,13 @@ from torch.utils.data import DistributedSampler, DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 import data
-import distributed as dist
+from utils import distributed as dist
 import builder
 import select_crops
 import custom_transform
 import utils
 
-import resnet_cifar
-import resnet_imagenet
+from models import resnet_cifar, resnet, vision_transformer as vits
 
 
 def custom_collate(batch):
@@ -37,27 +36,46 @@ def custom_collate(batch):
 
 
 def main(cfg):
-    dist.init_distributed_mode(cfg)
-    utils.fix_random_seeds(cfg.seed)
+    dist.init_distributed_mode(cfg) if not dist.is_enabled() else None
     cudnn.benchmark = True
 
     print(f"git:\n  {utils.get_sha()}\n")
     print(OmegaConf.to_yaml(cfg))
 
-    if cfg.arch in resnet_cifar.__dict__.keys():
+    if cfg.arch in vits.__dict__.keys():
+        arch = vits.__dict__[cfg.arch](
+            img_size=cfg.img_size,
+            patch_size=cfg.patch_size,
+            drop_path_rate=cfg.drop_path_rate,
+        )
+        proj_layer = 3
+        encoder_params = {
+            "num_classes": cfg.dim
+        }
+    elif cfg.arch in resnet_cifar.__dict__.keys():
         arch = resnet_cifar.__dict__[cfg.arch]
         proj_layer = 2
-    elif cfg.arch in resnet_imagenet.__dict__.keys():
-        arch = resnet_imagenet.__dict__[cfg.arch]
+        encoder_params = {
+            "num_classes": cfg.dim,
+            "zero_init_residual": True
+        }
+    elif cfg.arch in resnet.__dict__.keys():
+        arch = resnet.__dict__[cfg.arch]
         proj_layer = 3
+        encoder_params = {
+            "num_classes": cfg.dim,
+            "zero_init_residual": True
+        }
     else:
         print(f"Unknown architecture: {cfg.arch}")
         sys.exit(1)
 
     model = builder.SimSiam(
         arch,
-        cfg.dim, cfg.pred_dim,
-        proj_layer,
+        dim=cfg.dim,
+        pred_dim=cfg.pred_dim,
+        proj_layer=proj_layer,
+        encoder_params=encoder_params
     ).cuda()
 
     if utils.has_batchnorms(model):

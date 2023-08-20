@@ -16,12 +16,10 @@ from omegaconf import OmegaConf
 from torch.utils.tensorboard import SummaryWriter
 
 import data
-import distributed as dist
-import optimizers
+from utils import distributed as dist, optimizers
 import utils
 
-import resnet_cifar
-import resnet_imagenet
+from models import resnet_cifar, resnet, vision_transformer as vits
 
 
 def main(cfg):
@@ -74,17 +72,23 @@ def main(cfg):
 
     # create model
     print("=> creating model '{}'".format(cfg.arch))
-    if cfg.arch in resnet_cifar.__dict__.keys():
-        arch = resnet_cifar.__dict__[cfg.arch]
-    elif cfg.arch in resnet_imagenet.__dict__.keys():
-        arch = resnet_imagenet.__dict__[cfg.arch]
+    if cfg.arch in vits.__dict__.keys():
+        model = vits.__dict__[cfg.arch](
+            img_size=cfg.img_size,
+            patch_size=cfg.patch_size,
+            num_classes=0,
+        )
+        embed_dim = model.embed_dim * (cfg.n_last_blocks + int(cfg.avgpool))
+        model.fc = nn.Linear(embed_dim, cfg.num_labels)
+    elif cfg.arch in resnet_cifar.__dict__.keys():
+        model = resnet_cifar.__dict__[cfg.arch](num_classes=cfg.num_labels)
+    elif cfg.arch in resnet.__dict__.keys():
+        model = resnet.__dict__[cfg.arch](num_classes=cfg.num_labels)
     else:
         print(f"Unknown architecture: {cfg.arch}")
         sys.exit(1)
 
-    model = arch.__dict__[cfg.arch](
-        num_classes=cfg.num_labels
-    ).cuda()
+    model.cuda()
 
     # freeze all layers but the last fc
     for name, param in model.named_parameters():

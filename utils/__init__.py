@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 import torch.distributed
 
-import distributed as dist
+from . import distributed as dist
 
 
 def fix_random_seeds(seed=0):
