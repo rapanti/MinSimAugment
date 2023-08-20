@@ -8,6 +8,8 @@ from omegaconf import OmegaConf
 
 from pretrain import get_args_parser as pretrain_get_args_parser
 from eval_linear import get_args_parser as eval_linear_get_args_parser
+from eval_knn import get_args_parser as eval_knn_get_args_parser
+import utils
 
 
 if __name__ == "__main__":
@@ -24,6 +26,7 @@ if __name__ == "__main__":
     slurm_parser.add_argument("--exp_dir", default=None, type=str)
 
     pretrain_parser = pretrain_get_args_parser()
+    eval_knn_parser = eval_knn_get_args_parser()
     eval_linear_parser = eval_linear_get_args_parser()
 
     conda_env_name = "minsim"
@@ -41,8 +44,11 @@ if __name__ == "__main__":
             if value is not None:
                 args[arg] = value
         seeds = [args.seed]
-        path_to_def = f"configs/{pretrain_args.dataset}/eval_linear_default.yaml"
-        eval_linear_args = OmegaConf.load(path_to_def)
+
+        path_to_def_knn = f"configs/{pretrain_args.dataset}/eval_knn_default.yaml"
+        path_to_def_linear = f"configs/{pretrain_args.dataset}/eval_linear_default.yaml"
+        eval_args_knn = OmegaConf.load(path_to_def_knn)
+        eval_args_linear = OmegaConf.load(path_to_def_linear)
 
     else:
         while True:
@@ -82,18 +88,35 @@ if __name__ == "__main__":
             seeds = [0]
 
         while True:
-            print("Specify eval parameters: ENTER for default; -h for -help")
+            print("Specify LINEAR eval parameters: ENTER for default; -h for -help")
             line = input()
             if line == "-h":
                 eval_linear_parser.print_usage()
                 continue
             temp = eval_linear_parser.parse_args(line.split())
-            path_to_def = f"configs/{args.dataset}/eval_linear_default.yaml"
-            eval_linear_args = OmegaConf.load(path_to_def)
+            path_to_def_linear = f"configs/{args.dataset}/eval_linear_default.yaml"
+            eval_args_linear = OmegaConf.load(path_to_def_linear)
+
             for arg in vars(temp):
                 value = temp.__dict__[arg]
                 if value is not None:
-                    eval_linear_args[arg] = value
+                    eval_args_linear[arg] = value
+            break
+
+        while True:
+            print("Specify kNN eval parameters: ENTER for default; -h for -help")
+            line = input()
+            if line == "-h":
+                eval_linear_parser.print_usage()
+                continue
+            temp = eval_linear_parser.parse_args(line.split())
+            path_to_def_knn = f"configs/{args.dataset}/eval_knn_default.yaml"
+            eval_args_knn = OmegaConf.load(path_to_def_knn)
+
+            for arg in vars(temp):
+                value = temp.__dict__[arg]
+                if value is not None:
+                    eval_args_knn[arg] = value
             break
 
     exp_dir = "/gpfs/bwfor/work/ws/fr_ir46-MinSim/experiments" if slurm_args.exp_dir is None else slurm_args.exp_dir
@@ -121,21 +144,31 @@ if __name__ == "__main__":
         args.dist_url = "tcp://localhost:" + str(master_port)
 
         # make sure that these arguments are the same
-        eval_linear_args.arch = args.arch
-        eval_linear_args.dataset = args.dataset
-        eval_linear_args.data_path = args.data_path
-        eval_linear_args.dist_url = args.dist_url
-        eval_linear_args.dist_backend = args.dist_backend
-        eval_linear_args.num_workers = args.num_workers
-        eval_linear_args.output_dir = args.output_dir
+        eval_args_knn.arch = args.arch
+        eval_args_knn.dataset = args.dataset
+        eval_args_knn.data_path = args.data_path
+        eval_args_knn.dist_url = args.dist_url
+        eval_args_knn.dist_backend = args.dist_backend
+        eval_args_knn.num_workers = args.num_workers
+        eval_args_knn.output_dir = args.output_dir
+
+        eval_args_linear.arch = args.arch
+        eval_args_linear.dataset = args.dataset
+        eval_args_linear.data_path = args.data_path
+        eval_args_linear.dist_url = args.dist_url
+        eval_args_linear.dist_backend = args.dist_backend
+        eval_args_linear.num_workers = args.num_workers
+        eval_args_linear.output_dir = args.output_dir
 
         print(f"using {args.dist_url=}")
         print(f"Experiment: {output_dir}")
 
         with open(output_dir.joinpath("pretrain.yaml"), mode="w", encoding="utf-8") as file:
             OmegaConf.save(config=args, f=file)
+        with open(output_dir.joinpath("eval_knn.yaml"), mode="w", encoding="utf-8") as file:
+            OmegaConf.save(config=eval_args_knn, f=file)
         with open(output_dir.joinpath("eval_linear.yaml"), mode="w", encoding="utf-8") as file:
-            OmegaConf.save(config=eval_linear_args, f=file)
+            OmegaConf.save(config=eval_args_linear, f=file)
 
         slurm_dir = output_dir.joinpath("slurm")
         slurm_dir.mkdir(parents=True, exist_ok=True)
