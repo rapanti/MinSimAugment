@@ -44,7 +44,7 @@ def main(cfg):
 
     if cfg.arch in vits.__dict__.keys():
         arch = vits.__dict__[cfg.arch](
-            img_size=cfg.img_size,
+            img_size=cfg.crop_size,
             patch_size=cfg.patch_size,
             drop_path_rate=cfg.drop_path_rate,
         )
@@ -269,7 +269,6 @@ def get_args_parser():
     # parameters for VitS
     p.add_argument('--patch_size', type=int, default=16,
                    help="Size in pixels of input square patches - default 16 (for 16x16 patches).")
-
 
     # data augmentation parameters:
     p.add_argument("--crop_size", type=int,
