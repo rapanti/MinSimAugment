@@ -161,7 +161,7 @@ if __name__ == "__main__":
             'echo "Started at $(date)"',
             'echo "Running job $SLURM_JOB_NAME with given JID $SLURM_JOB_ID on queue $SLURM_JOB_PARTITION"\n',
             f"source {profile_path}",
-            "conda activate torch"
+            f"conda activate {conda_env_name}"
         ]
         run = [
             "torchrun",
