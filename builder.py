@@ -17,7 +17,6 @@ class SimSiam(nn.Module):
         # create the encoder
         if encoder_params:
             self.encoder = base_encoder(**encoder_params)
-            summary(self.encoder, (3, 224, 224))
         else:
             # num_classes is the output fc dimension, zero-initialize last BNs
             self.encoder = base_encoder(num_classes=dim, zero_init_residual=True)
@@ -48,8 +47,6 @@ class SimSiam(nn.Module):
                                        nn.ReLU(inplace=True),  # hidden layer
                                        nn.Linear(pred_dim, dim))  # output layer
 
-        summary(self.predictor, (10, dim))
-
     def forward(self, x1, x2):
         """
         Input:
@@ -60,6 +57,8 @@ class SimSiam(nn.Module):
             See Sec. 3 of https://arxiv.org/abs/2011.10566 for detailed notations
         """
 
+        summary(self.encoder, (3, 224, 224))
+        summary(self.predictor, (3, 224, 224))
         # compute features for one view
         z1 = self.encoder(x1)  # NxC
         z2 = self.encoder(x2)  # NxC
