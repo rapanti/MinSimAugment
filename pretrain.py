@@ -78,8 +78,6 @@ def main(cfg):
         encoder_params=encoder_params
     ).cuda()
 
-    summary(model, (3, 224, 224), (3, 224, 224))
-
     if utils.has_batchnorms(model):
         model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
     model = nn.parallel.DistributedDataParallel(model, device_ids=[cfg.gpu])

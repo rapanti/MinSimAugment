@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-
+from torchsummary import summary
 
 class SimSiam(nn.Module):
     """
@@ -17,6 +17,7 @@ class SimSiam(nn.Module):
         # create the encoder
         if encoder_params:
             self.encoder = base_encoder(**encoder_params)
+            summary(self.encoder, (3, 224, 224))
         else:
             # num_classes is the output fc dimension, zero-initialize last BNs
             self.encoder = base_encoder(num_classes=dim, zero_init_residual=True)
@@ -46,6 +47,8 @@ class SimSiam(nn.Module):
                                        nn.BatchNorm1d(pred_dim),
                                        nn.ReLU(inplace=True),  # hidden layer
                                        nn.Linear(pred_dim, dim))  # output layer
+
+        summary(self.predictor, (10, dim))
 
     def forward(self, x1, x2):
         """
