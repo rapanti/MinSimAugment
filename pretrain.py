@@ -25,6 +25,7 @@ import custom_transform
 import utils
 
 from models import resnet_cifar, resnet, vision_transformer as vits
+from torchsummary import summary
 
 
 def custom_collate(batch):
@@ -76,6 +77,8 @@ def main(cfg):
         proj_layer=proj_layer,
         encoder_params=encoder_params
     ).cuda()
+
+    summary(model, (3, 224, 224))
 
     if utils.has_batchnorms(model):
         model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
