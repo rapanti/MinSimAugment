@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from torchsummary import summary
+from models.vision_transformer import VisionTransformer
 
 class SimSiam(nn.Module):
     """
@@ -15,14 +16,11 @@ class SimSiam(nn.Module):
         super(SimSiam, self).__init__()
 
         # create the encoder
-        if encoder_params:
-            self.encoder = base_encoder(**encoder_params)
-        else:
-            # num_classes is the output fc dimension, zero-initialize last BNs
-            self.encoder = base_encoder(num_classes=dim, zero_init_residual=True)
+        self.encoder = base_encoder(**encoder_params)
 
         # build an n-layer projector
         prev_dim = self.encoder.fc.weight.shape[1]
+
         layers = [
             nn.Linear(prev_dim, prev_dim, bias=False),
             nn.BatchNorm1d(prev_dim),
@@ -57,11 +55,14 @@ class SimSiam(nn.Module):
             See Sec. 3 of https://arxiv.org/abs/2011.10566 for detailed notations
         """
 
-        summary(self.encoder, (3, 224, 224))
-        summary(self.predictor, (3, 224, 224))
         # compute features for one view
         z1 = self.encoder(x1)  # NxC
         z2 = self.encoder(x2)  # NxC
+
+        # projector / fc is not called in ViT's forward
+        if isinstance(self.encoder, VisionTransformer):
+            z1 = self.encoder.fc(z1)
+            z2 = self.encoder.fc(z2)
 
         p1 = self.predictor(z1)  # NxC
         p2 = self.predictor(z2)  # NxC
