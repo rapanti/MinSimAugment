@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
-from torchsummary import summary
 from models.vision_transformer import VisionTransformer
+
 
 class SimSiam(nn.Module):
     """
@@ -72,6 +72,9 @@ class SimSiam(nn.Module):
     @torch.no_grad()
     def single_forward(self, x):
         z = self.encoder(x)
+        # projector / fc is not called in ViT's forward
+        if isinstance(self.encoder, VisionTransformer):
+            z = self.encoder.fc(z)
         p = self.predictor(z)
         return p, z
 
