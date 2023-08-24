@@ -19,13 +19,12 @@ from torch.utils.tensorboard import SummaryWriter
 
 import data
 from utils import distributed as dist
-import builder
+from builder import BarlowTwins
 import select_crops
 import custom_transform
 import utils
-
-from models import resnet_cifar, resnet, vision_transformer as vits
-from torchsummary import summary
+from utils.optimizers import LARS
+from data import Transform
 
 
 def custom_collate(batch):
@@ -43,89 +42,32 @@ def main(cfg):
     print(f"git:\n  {utils.get_sha()}\n")
     print(OmegaConf.to_yaml(cfg))
 
-    if cfg.arch in vits.__dict__.keys():
-        arch = vits.__dict__[cfg.arch]
-        proj_layer = 3
-        encoder_params = {
-            "img_size": cfg.crop_size,
-            "patch_size": cfg.patch_size,
-            "drop_path_rate": cfg.drop_path_rate,
-            "num_classes": cfg.dim
-        }
-    elif cfg.arch in resnet_cifar.__dict__.keys():
-        arch = resnet_cifar.__dict__[cfg.arch]
-        proj_layer = 2
-        encoder_params = {
-            "num_classes": cfg.dim,
-            "zero_init_residual": True
-        }
-    elif cfg.arch in resnet.__dict__.keys():
-        arch = resnet.__dict__[cfg.arch]
-        proj_layer = 3
-        encoder_params = {
-            "num_classes": cfg.dim,
-            "zero_init_residual": True
-        }
-    else:
+    if not cfg.arch.startswith("resnet"):
         print(f"Unknown architecture: {cfg.arch}")
         sys.exit(1)
 
-    model = builder.SimSiam(
-        arch,
-        dim=cfg.dim,
-        pred_dim=cfg.pred_dim,
-        proj_layer=proj_layer,
-        encoder_params=encoder_params
-    ).cuda()
+    model = BarlowTwins(args).cuda()
+
+    param_weights = []
+    param_biases = []
+    for param in model.parameters():
+        if param.ndim == 1:
+            param_biases.append(param)
+        else:
+            param_weights.append(param)
+
+    parameters = [{'params': param_weights}, {'params': param_biases}]
 
     if utils.has_batchnorms(model):
         model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
     model = nn.parallel.DistributedDataParallel(model, device_ids=[cfg.gpu])
 
-    init_lr = cfg.lr * cfg.batch_size / 256
+    optimizer = LARS(parameters, lr=0, weight_decay=cfg.weight_decay,
+                     weight_decay_filter=True,
+                     lars_adaptation_filter=True)
 
-    criterion = nn.CosineSimilarity(dim=1).cuda()
-
-    if cfg.fix_pred_lr:
-        optim_params = [{'params': model.module.encoder.parameters(), 'fix_lr': False},
-                        {'params': model.module.predictor.parameters(), 'fix_lr': True}]
-    else:
-        optim_params = model.parameters()
-
-    optimizer = torch.optim.SGD(optim_params, init_lr, momentum=cfg.momentum, weight_decay=cfg.weight_decay)
-
+    # init_lr = cfg.lr * cfg.batch_size / 256
     fp16 = torch.cuda.amp.GradScaler() if cfg.fp16 else None
-
-    # ============ preparing data ... ============
-    if cfg.dataset == "CIFAR10":
-        mean, std = data.CIFAR10_DEFAULT_MEAN, data.CIFAR10_DEFAULT_STD
-    else:
-        mean, std = data.IMAGENET_DEFAULT_MEAN, data.IMAGENET_DEFAULT_STD
-
-    transform = custom_transform.TransformParams(
-        crop_size=cfg.crop_size,
-        crop_scale=cfg.crop_scale,
-        blur_prob=cfg.blur_prob,
-        hflip_prob=cfg.hflip_prob,
-        mean=mean,
-        std=std,
-    )
-    multi_crops_transform = data.MultiCropsTransform(transform, cfg.num_crops)
-    dataset, _ = data.make_dataset(cfg.data_path, cfg.dataset, True, multi_crops_transform)
-
-    sampler = DistributedSampler(dataset)
-    cfg.batch_size_per_gpu = cfg.batch_size // dist.get_world_size()
-    loader = DataLoader(
-        dataset,
-        sampler=sampler,
-        batch_size=cfg.batch_size_per_gpu,
-        num_workers=cfg.num_workers,
-        pin_memory=True,
-        drop_last=True,
-        collate_fn=custom_collate,
-    )
-
-    select_fn = select_crops.names[cfg.select_fn]
 
     # ============ optionally resume training ... ============
     to_restore = {"epoch": 0, "total_time": 0}
@@ -139,12 +81,32 @@ def main(cfg):
     start_epoch = to_restore["epoch"]
     total_time = to_restore["total_time"]
 
+    # ============ preparing data ... ============
+    dataset, _ = data.make_dataset(cfg.data_path, cfg.dataset, train=True, transform=Transform())
+    sampler = DistributedSampler(dataset)
+    assert cfg.batch_size % dist.get_world_size() == 0
+    cfg.batch_size_per_gpu = cfg.batch_size // dist.get_world_size()
+
+    loader = DataLoader(
+        dataset,
+        sampler=sampler,
+        batch_size=cfg.batch_size_per_gpu,
+        num_workers=cfg.num_workers,
+        pin_memory=True,
+        # collate_fn=custom_collate,
+    )
+
+    # select_fn = select_crops.names[cfg.select_fn]
+
+    # until here
+    # TODO ------------------------------ TODO
+
     log_dir = os.path.join(cfg.output_dir, "tensorboard")
     board = SummaryWriter(log_dir) if dist.is_main_process() else None
 
     for epoch in range(start_epoch, cfg.epochs):
         loader.sampler.set_epoch(epoch)
-        adjust_learning_rate(optimizer, init_lr, epoch, cfg)
+        adjust_learning_rate(cfg, optimizer, loader, step)
 
         start = time.time()
         train_stats, metrics = train(loader, model, criterion, optimizer, epoch, cfg, fp16, board, select_fn)
@@ -226,14 +188,20 @@ def train(loader, model, criterion, optimizer, epoch, cfg, fp16, board, select_f
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}, metrics
 
 
-def adjust_learning_rate(optimizer, init_lr, epoch, args):
-    """Decay the learning rate based on schedule"""
-    cur_lr = init_lr * 0.5 * (1. + math.cos(math.pi * epoch / args.epochs))
-    for param_group in optimizer.param_groups:
-        if 'fix_lr' in param_group and param_group['fix_lr']:
-            param_group['lr'] = init_lr
-        else:
-            param_group['lr'] = cur_lr
+def adjust_learning_rate(cfg, optimizer, loader, step):
+    max_steps = cfg.epochs * len(loader)
+    warmup_steps = 10 * len(loader)
+    base_lr = cfg.batch_size / 256
+    if step < warmup_steps:
+        lr = base_lr * step / warmup_steps
+    else:
+        step -= warmup_steps
+        max_steps -= warmup_steps
+        q = 0.5 * (1 + math.cos(math.pi * step / max_steps))
+        end_lr = base_lr * 0.001
+        lr = base_lr * q + end_lr * (1 - q)
+    optimizer.param_groups[0]['lr'] = lr * cfg.learning_rate_weights
+    optimizer.param_groups[1]['lr'] = lr * cfg.learning_rate_biases
 
 
 def get_args_parser():
@@ -249,28 +217,23 @@ def get_args_parser():
                    help="Name of architecture to train (default: resnet50)")
     p.add_argument('--epochs', type=int,
                    help='number of total epochs to run (default: 100)')
-    p.add_argument('-b', '--batch_size', type=int,
-                   help='total batch-size (default: 512)')
-    p.add_argument('--lr', type=float,
-                   help='initial (base) learning rate (default: 0.05)')
-    p.add_argument('--momentum', type=float,
-                   help='momentum of SGD solver (default: 0.9)')
-    p.add_argument('--wd', '--weight_decay', dest="weight_decay", type=float,
-                   help='weight decay (default: 1e-4)')
+    p.add_argument('-b', '--batch_size', default=2048, type=int,
+                   help='total batch-size (default: 2048)')
 
-    # simsiam specific parameters:
-    p.add_argument('--dim', type=int,
-                   help='feature dimension (default: 2048)')
-    p.add_argument('--pred_dim', type=int,
-                   help='hidden dimension of the predictor (default: 512)')
-    p.add_argument('--fix_pred_lr', type=utils.bool_flag,
-                   help='Fix learning rate for the predictor (default: True)')
+    p.add_argument('--learning_rate_weights', default=0.2, type=float, metavar='LR',
+                        help='base learning rate for weights')
+    p.add_argument('--learning_rate_biases', default=0.0048, type=float, metavar='LR',
+                        help='base learning rate for biases and batch norm parameters')
 
-    # parameters for VitS
-    p.add_argument('--patch_size', type=int, default=16,
-                   help="Size in pixels of input square patches - default 16 (for 16x16 patches).")
-    p.add_argument('--drop_path_rate', type=float,
-                   help="stochastic depth rate. (default: 0.1)")
+    p.add_argument('--wd', '--weight_decay', default=1e-6, dest="weight_decay", type=float,
+                   help='weight decay (default: 1e-6)')
+
+    # BT specific parameters:
+    p.add_argument('--lambd', default=0.0051, type=float, metavar='L',
+                        help='weight on off-diagonal terms')
+    p.add_argument('--projector', default='8192-8192-8192', type=str,
+                        metavar='MLP', help='projector MLP')
+
 
     # data augmentation parameters:
     p.add_argument("--crop_size", type=int,
@@ -301,7 +264,7 @@ def get_args_parser():
                    help="distributed backend (default: nccl)")
     p.add_argument("--dist_url", default="env://", type=str,
                    help="url used to set up distributed training")
-    p.add_argument("--print_freq", default=10, type=int,
+    p.add_argument("--print_freq", default=100, type=int,
                    help="Print progress every x iterations (default: 10)")
     p.add_argument("--logger_freq", default=50, type=int,
                    help="Log progress every x iterations to tensorboard (default: 50)")

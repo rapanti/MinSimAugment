@@ -1,80 +1,49 @@
 import torch
 import torch.nn as nn
-from models.vision_transformer import VisionTransformer
+import torchvision
+from utils import off_diagonal
+import torch.distributed
 
 
-class SimSiam(nn.Module):
-    """
-    Build a SimSiam model.
-    """
+class BarlowTwins(nn.Module):
+    def __init__(self, cfg):
+        super().__init__()
+        self.cfg = cfg
+        self.backbone = torchvision.models.resnet50(zero_init_residual=True)
+        self.backbone.fc = nn.Identity()
 
-    def __init__(self, base_encoder, dim=2048, pred_dim=512, proj_layer=3, encoder_params={}):
-        """
-        dim: feature dimension (default: 2048)
-        pred_dim: hidden dimension of the predictor (default: 512)
-        """
-        super(SimSiam, self).__init__()
+        # projector
+        sizes = [2048] + list(map(int, cfg.projector.split('-')))
+        layers = []
+        for i in range(len(sizes) - 2):
+            layers.append(nn.Linear(sizes[i], sizes[i + 1], bias=False))
+            layers.append(nn.BatchNorm1d(sizes[i + 1]))
+            layers.append(nn.ReLU(inplace=True))
+        layers.append(nn.Linear(sizes[-2], sizes[-1], bias=False))
+        self.projector = nn.Sequential(*layers)
 
-        # create the encoder
-        self.encoder = base_encoder(**encoder_params)
+        # normalization layer for the representations z1 and z2
+        self.bn = nn.BatchNorm1d(sizes[-1], affine=False)
 
-        # build an n-layer projector
-        prev_dim = self.encoder.fc.weight.shape[1]
+    def forward(self, y1, y2):
+        z1 = self.projector(self.backbone(y1))
+        z2 = self.projector(self.backbone(y2))
 
-        layers = [
-            nn.Linear(prev_dim, prev_dim, bias=False),
-            nn.BatchNorm1d(prev_dim),
-            nn.ReLU(inplace=True),
-        ]
-        for _ in range(proj_layer - 2):
-            layers.extend([
-                nn.Linear(prev_dim, prev_dim, bias=False),
-                nn.BatchNorm1d(prev_dim),
-                nn.ReLU(inplace=True),
-            ])
-        layers.extend([
-            self.encoder.fc,
-            nn.BatchNorm1d(dim, affine=False)
-        ])
-        self.encoder.fc = nn.Sequential(*layers)  # output layer
-        self.encoder.fc[-2].bias.requires_grad = False  # hack: not use bias as it is followed by BN
+        # empirical cross-correlation matrix
+        c = self.bn(z1).T @ self.bn(z2)
 
-        # build a 2-layer predictor
-        self.predictor = nn.Sequential(nn.Linear(dim, pred_dim, bias=False),
-                                       nn.BatchNorm1d(pred_dim),
-                                       nn.ReLU(inplace=True),  # hidden layer
-                                       nn.Linear(pred_dim, dim))  # output layer
+        # sum the cross-correlation matrix between all gpus
+        c.div_(self.cfg.batch_size)
+        torch.distributed.all_reduce(c)
 
-    def forward(self, x1, x2):
-        """
-        Input:
-            x1: first views of images
-            x2: second views of images
-        Output:
-            p1, p2, z1, z2: predictors and targets of the network
-            See Sec. 3 of https://arxiv.org/abs/2011.10566 for detailed notations
-        """
-
-        # compute features for one view
-        z1 = self.encoder(x1)  # NxC
-        z2 = self.encoder(x2)  # NxC
-
-        # projector / fc is not called in ViT's forward
-        if isinstance(self.encoder, VisionTransformer):
-            z1 = self.encoder.fc(z1)
-            z2 = self.encoder.fc(z2)
-
-        p1 = self.predictor(z1)  # NxC
-        p2 = self.predictor(z2)  # NxC
-
-        return p1, p2, z1.detach(), z2.detach()
+        on_diag = torch.diagonal(c).add_(-1).pow_(2).sum()
+        off_diag = off_diagonal(c).pow_(2).sum()
+        loss = on_diag + self.cfg.lambd * off_diag
+        return loss
 
     @torch.no_grad()
     def single_forward(self, x):
         z = self.encoder(x)
-        # projector / fc is not called in ViT's forward
-        if isinstance(self.encoder, VisionTransformer):
-            z = self.encoder.fc(z)
         p = self.predictor(z)
         return p, z
 
