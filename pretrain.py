@@ -46,7 +46,7 @@ def main(cfg):
         print(f"Unknown architecture: {cfg.arch}")
         sys.exit(1)
 
-    model = BarlowTwins(args).cuda()
+    model = BarlowTwins(cfg).cuda()
 
     param_weights = []
     param_biases = []
@@ -98,9 +98,6 @@ def main(cfg):
 
     # select_fn = select_crops.names[cfg.select_fn]
 
-    # until here
-    # TODO ------------------------------ TODO
-
     log_dir = os.path.join(cfg.output_dir, "tensorboard")
     board = SummaryWriter(log_dir) if dist.is_main_process() else None
 
@@ -146,9 +143,11 @@ def train(loader, model, optimizer, epoch, cfg, fp16, board):
     }
     metric_logger = utils.MetricLogger(delimiter=" ")
     header = 'Epoch: [{}/{}]'.format(epoch, cfg.epochs)
-    for it, (images, params) in enumerate(metric_logger.log_every(loader, cfg.print_freq, header)):
-        adjust_learning_rate(cfg, optimizer, loader, it)
+
+    for it, (images, _) in enumerate(metric_logger.log_every(loader, cfg.print_freq, header)):
         it = len(loader) * epoch + it  # global training iteration
+
+        adjust_learning_rate(cfg, optimizer, loader, it)
 
         images = [im.cuda(non_blocking=True) for im in images]
 
@@ -206,7 +205,7 @@ def adjust_learning_rate(cfg, optimizer, loader, step):
 
 
 def get_args_parser():
-    p = argparse.ArgumentParser("SimSiam", description='Pytorch Pretraining on ImageNet', add_help=False)
+    p = argparse.ArgumentParser("Barlow Twins", description='Pytorch Pretraining on ImageNet', add_help=False)
     p.add_argument('--dataset', type=str, default="ImageNet",
                    help='Specify dataset (default: ImageNet)')
     p.add_argument('--data_path', type=str,
@@ -221,11 +220,6 @@ def get_args_parser():
     p.add_argument('-b', '--batch_size', default=2048, type=int,
                    help='total batch-size (default: 2048)')
 
-    p.add_argument('--learning_rate_weights', default=0.2, type=float, metavar='LR',
-                        help='base learning rate for weights')
-    p.add_argument('--learning_rate_biases', default=0.0048, type=float, metavar='LR',
-                        help='base learning rate for biases and batch norm parameters')
-
     p.add_argument('--wd', '--weight_decay', default=1e-6, dest="weight_decay", type=float,
                    help='weight decay (default: 1e-6)')
 
@@ -234,7 +228,10 @@ def get_args_parser():
                         help='weight on off-diagonal terms')
     p.add_argument('--projector', default='8192-8192-8192', type=str,
                         metavar='MLP', help='projector MLP')
-
+    p.add_argument('--learning_rate_weights', default=0.2, type=float, metavar='LR',
+                        help='base learning rate for weights')
+    p.add_argument('--learning_rate_biases', default=0.0048, type=float, metavar='LR',
+                        help='base learning rate for biases and batch norm parameters')
 
     # data augmentation parameters:
     p.add_argument("--crop_size", type=int,

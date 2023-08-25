@@ -167,7 +167,7 @@ def make_dataset(
         train: bool,
         transform):
     if dataset == 'CIFAR10':
-        return CIFAR10(root, download=True, train=train, transform=transform), 10
+        return CIFAR10(root, download=False, train=train, transform=transform), 10
     if dataset == 'CIFAR100':
         return CIFAR100(root, download=True, train=train, transform=transform), 100
     elif dataset == 'ImageNet':

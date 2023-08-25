@@ -28,9 +28,13 @@ class BarlowTwins(nn.Module):
     def forward(self, y1, y2):
         z1 = self.projector(self.backbone(y1))
         z2 = self.projector(self.backbone(y2))
+        # (16, 8192) -> 8 * (2, 8192)
+        #
 
         # empirical cross-correlation matrix
-        c = self.bn(z1).T @ self.bn(z2)
+        c = self.bn(z1).T @ self.bn(z2)  # (batch_size, dim_bn).T @ (batch_size, dim_bn) -> dim_bn x dim_bn
+        # (8192, 16) @ (16, 8192) -> (8192, 8192)
+        #
 
         # sum the cross-correlation matrix between all gpus
         c.div_(self.cfg.batch_size)
@@ -45,7 +49,7 @@ class BarlowTwins(nn.Module):
     def single_forward(self, x):
         z = self.backbone(x)
         p = self.projector(z)
-        return p, z
+        return p
 
     @torch.no_grad()
     def conv1_layer(self, x):

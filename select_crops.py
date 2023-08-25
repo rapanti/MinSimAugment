@@ -1,34 +1,49 @@
 import torch
 import torch.nn.functional as nnf
+from utils import off_diagonal
 
 
 @torch.no_grad()
-def select_crops_identity(images, model, fp16):
+def select_crops_identity(images, model, fp16, **kwargsarg):
     return images[0], images[1], torch.zeros(1), torch.zeros(1)
 
 
 @torch.no_grad()
-def select_crops_cross(images, model, fp16):
+def select_crops_cross(images, model, fp16, cfg):
     b, c, h, w = images[0].shape
     device = images[0].device
+    chunk_size = 2
 
     with torch.cuda.amp.autocast(fp16 is not None):
         model_out = model.module.single_forward(torch.cat(images, dim=0))
-    p1s, z1s = model_out[0].chunk(len(images)), model_out[1].chunk(len(images))
+    model_out = model_out.chunk(len(images))
 
     out1 = torch.zeros_like(images[0])
     out2 = torch.zeros_like(images[0])
-    score = torch.full([b], torch.inf, device=device)
+    score = torch.full([b], -torch.inf, device=device)
     selected = torch.zeros((2, b), dtype=torch.uint8)
 
     for n in range(len(images)):
-        p1, z1 = p1s[n], z1s[n]
+        p1 = model_out[n]
         for m in range(n + 1, len(images)):
-            p2, z2 = p1s[m], z1s[m]
+            p2 = model_out[m]
 
+            chunk_losses = torch.zeros(b, device=device)
             with torch.cuda.amp.autocast(fp16 is not None):
-                sim = (nnf.cosine_similarity(p1, z2) + nnf.cosine_similarity(p2, z1)) * 0.5
-                score, indices = torch.stack((score, sim)).min(dim=0)
+                for i, (a, b) in enumerate(zip(p1.chunk(chunk_size), p2.chunk(chunk_size))):
+                    a_norm = (a - a.mean() / a.std())
+                    b_norm = (b - b.mean() / b.std())
+                    c = a_norm.T @ b_norm
+
+                    # sum the cross-correlation matrix between all gpus
+                    c.div_(b//chunk_size)
+
+                    on_diag = torch.diagonal(c).add_(-1).pow_(2).sum()
+                    off_diag = off_diagonal(c).pow_(2).sum()
+                    loss = on_diag + cfg.lambd * off_diag
+                    chunk_losses[i*chunk_size:(i+1)*chunk_size] = loss
+
+                score, indices = torch.stack((score, chunk_losses)).max(dim=0)
                 indices = indices.type(torch.bool)
             selected[0][indices] = n
             selected[1][indices] = m
