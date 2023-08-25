@@ -106,10 +106,9 @@ def main(cfg):
 
     for epoch in range(start_epoch, cfg.epochs):
         loader.sampler.set_epoch(epoch)
-        adjust_learning_rate(cfg, optimizer, loader, step)
 
         start = time.time()
-        train_stats, metrics = train(loader, model, criterion, optimizer, epoch, cfg, fp16, board, select_fn)
+        train_stats, metrics = train(loader, model, optimizer, epoch, cfg, fp16, board)
         total_time += int(time.time() - start)
 
         save_dict = {
@@ -135,7 +134,7 @@ def main(cfg):
     print('Training time {}'.format(total_time_str))
 
 
-def train(loader, model, criterion, optimizer, epoch, cfg, fp16, board, select_fn):
+def train(loader, model, optimizer, epoch, cfg, fp16, board):
     model.train()
     metrics = {
         "epoch": epoch,
@@ -148,17 +147,19 @@ def train(loader, model, criterion, optimizer, epoch, cfg, fp16, board, select_f
     metric_logger = utils.MetricLogger(delimiter=" ")
     header = 'Epoch: [{}/{}]'.format(epoch, cfg.epochs)
     for it, (images, params) in enumerate(metric_logger.log_every(loader, cfg.print_freq, header)):
+        adjust_learning_rate(cfg, optimizer, loader, it)
         it = len(loader) * epoch + it  # global training iteration
 
         images = [im.cuda(non_blocking=True) for im in images]
 
-        x1, x2, selected, sample_loss = select_fn(images, model, fp16)
-
-        with torch.cuda.amp.autocast(fp16 is not None):
-            p1, p2, z1, z2 = model(x1=x1, x2=x2)
-            loss = -(criterion(p1, z2).mean() + criterion(p2, z1).mean()) * 0.5
+        # x1, x2, selected, sample_loss = select_fn(images, model, fp16)
 
         optimizer.zero_grad()
+        with torch.cuda.amp.autocast(fp16 is not None):
+            loss = model.forward(images[0], images[1])
+            # p1, p2, z1, z2 = model(x1=x1, x2=x2)
+            # loss = -(criterion(p1, z2).mean() + criterion(p2, z1).mean()) * 0.5
+
         if fp16 is None:
             loss.backward()
             optimizer.step()
@@ -175,9 +176,9 @@ def train(loader, model, criterion, optimizer, epoch, cfg, fp16, board, select_f
         metrics["loss"].append(loss.item())
         metrics["lr"].append(optimizer.param_groups[0]["lr"])
         if cfg.use_adv_metric and it % cfg.adv_metric_freq == 0:
-            metrics["selected"].append(selected.tolist())
+            # metrics["selected"].append(selected.tolist())
             metrics["params"].append(params)
-            metrics["sample-loss"].append(sample_loss.tolist())
+            # metrics["sample-loss"].append(sample_loss.tolist())
 
         if dist.is_main_process() and it % cfg.logger_freq == 0:
             board.add_scalar("training loss", loss.item(), it)

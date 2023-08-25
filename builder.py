@@ -43,8 +43,8 @@ class BarlowTwins(nn.Module):
 
     @torch.no_grad()
     def single_forward(self, x):
-        z = self.encoder(x)
-        p = self.predictor(z)
+        z = self.backbone(x)
+        p = self.projector(z)
         return p, z
 
     @torch.no_grad()
