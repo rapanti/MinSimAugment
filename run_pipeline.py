@@ -12,7 +12,6 @@ if __name__ == "__main__":
     utils.distributed.init_distributed_mode(cfg)
     utils.fix_random_seeds(cfg.seed)
 
-
     print('STARTING PRETRAINING')
     pretrain.main(cfg)
 
