@@ -15,7 +15,7 @@ from omegaconf import OmegaConf
 from torch.utils.tensorboard import SummaryWriter
 
 import data
-import distributed as dist
+from utils import dist as dist
 import optimizers
 import utils
 

@@ -4,6 +4,7 @@ import math
 import os
 import time
 import datetime
+from collections import defaultdict
 from pathlib import Path
 
 import torch
@@ -15,11 +16,14 @@ import torch.utils.data
 from omegaconf import OmegaConf
 from torch.utils.data import DistributedSampler, DataLoader
 from torch.utils.tensorboard import SummaryWriter
+from torchvision import models
+
+from methods.simsiam import SimSiam
+from transforms.simsiam_transform import SimSiamTransform
 
 import data
-import distributed as dist
-import builder
-import select_crops
+from utils import dist as dist
+import minsim
 import utils
 
 
@@ -31,53 +35,22 @@ def main(cfg):
     print(f"git:\n  {utils.get_sha()}\n")
     print(OmegaConf.to_yaml(cfg))
 
-    if cfg.dataset == "CIFAR10":
-        import resnet_cifar as models
-        proj_layer = 2
-    else:
-        import resnet_imagenet as models
-        proj_layer = 3
+    backbone = models.__dict__[cfg.arch](zero_init_residual=True)
 
-    model = builder.SimSiam(
-        models.__dict__[cfg.arch],
-        cfg.dim, cfg.pred_dim,
-        proj_layer,
-    ).cuda()
+    model = SimSiam(backbone).cuda()
 
     if utils.has_batchnorms(model):
         model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
     model = nn.parallel.DistributedDataParallel(model, device_ids=[cfg.gpu])
 
     init_lr = cfg.lr * cfg.batch_size / 256
-
-    criterion = nn.CosineSimilarity(dim=1).cuda()
-
-    if cfg.fix_pred_lr:
-        optim_params = [{'params': model.module.encoder.parameters(), 'fix_lr': False},
-                        {'params': model.module.predictor.parameters(), 'fix_lr': True}]
-    else:
-        optim_params = model.parameters()
-
-    optimizer = torch.optim.SGD(optim_params, init_lr, momentum=cfg.momentum, weight_decay=cfg.weight_decay)
+    optimizer = model.module.configure_optimizers(cfg.fix_pred_lr, init_lr, momentum=cfg.momentum, weight_decay=cfg.weight_decay)
 
     fp16 = torch.cuda.amp.GradScaler() if cfg.fp16 else None
 
     # ============ preparing data ... ============
-    if cfg.dataset == "CIFAR10":
-        mean, std = data.CIFAR10_DEFAULT_MEAN, data.CIFAR10_DEFAULT_STD
-    else:
-        mean, std = data.IMAGENET_DEFAULT_MEAN, data.IMAGENET_DEFAULT_STD
-
-    transform = data.make_pretrain_transform(
-        crop_size=cfg.crop_size,
-        crop_scale=cfg.crop_scale,
-        blur_prob=cfg.blur_prob,
-        hflip_prob=cfg.hflip_prob,
-        mean=mean,
-        std=std,
-    )
-    two_crops_transform = data.TwoCropsTransform(transform, cfg.num_crops)
-    dataset, _ = data.make_dataset(cfg.data_path, cfg.dataset, True, two_crops_transform)
+    transform = SimSiamTransform(return_params=True)
+    dataset, _ = data.make_dataset(cfg.data_path, cfg.dataset, True, transform)
 
     sampler = DistributedSampler(dataset)
     cfg.batch_size_per_gpu = cfg.batch_size // dist.get_world_size()
@@ -90,7 +63,8 @@ def main(cfg):
         drop_last=True,
     )
 
-    select_fn = select_crops.names[cfg.select_fn]
+    # ============ preparing MinSim ... ============
+    ms_fn = minsim.names[cfg.select_fn]
 
     # ============ optionally resume training ... ============
     to_restore = {"epoch": 0, "total_time": 0}
@@ -112,7 +86,7 @@ def main(cfg):
         adjust_learning_rate(optimizer, init_lr, epoch, cfg)
 
         start = time.time()
-        train_stats, metrics = train(loader, model, criterion, optimizer, epoch, cfg, fp16, board, select_fn)
+        train_stats, metrics = train(loader, model, optimizer, epoch, cfg, fp16, board, ms_fn)
         total_time += int(time.time() - start)
 
         save_dict = {
@@ -138,25 +112,24 @@ def main(cfg):
     print('Training time {}'.format(total_time_str))
 
 
-def train(loader, model, criterion, optimizer, epoch, cfg, fp16, board, select_fn):
+def train(loader, model, optimizer, epoch, cfg, fp16, board, ms_fn):
     model.train()
-    metrics = {
-        "epoch": epoch,
-        "loss": [],
-        "lr": [],
-    }
+    metrics = defaultdict(list)
+    metrics["epoch"] = epoch
     metric_logger = utils.MetricLogger(delimiter=" ")
     header = 'Epoch: [{}/{}]'.format(epoch, cfg.epochs)
-    for it, (images, _) in enumerate(metric_logger.log_every(loader, cfg.print_freq, header)):
+    for it, batch in enumerate(metric_logger.log_every(loader, cfg.print_freq, header)):
         it = len(loader) * epoch + it  # global training iteration
 
-        images = [im.cuda(non_blocking=True) for im in images]
+        images = batch[0][:cfg.num_crops]
+        params = batch[0][cfg.num_crops:]
 
-        x1, x2 = select_fn(images, model, fp16)
+        images = [img.cuda(non_blocking=True) for img in images]
+
+        images, selected, sample_loss = ms_fn(images, model, fp16)
 
         with torch.cuda.amp.autocast(fp16 is not None):
-            p1, p2, z1, z2 = model(x1=x1, x2=x2)
-            loss = -(criterion(p1, z2).mean() + criterion(p2, z1).mean()) * 0.5
+            loss = model.module.training_step(images, it)
 
         optimizer.zero_grad()
         if fp16 is None:
@@ -175,8 +148,10 @@ def train(loader, model, criterion, optimizer, epoch, cfg, fp16, board, select_f
         metrics["loss"].append(loss.item())
         metrics["lr"].append(optimizer.param_groups[0]["lr"])
         if cfg.use_adv_metric and it % cfg.adv_metric_freq == 0:
-            # in this branch not implemented yet
-            pass
+            params = [p.tolist() for p in params]
+            metrics["selected"].append(selected.tolist())
+            metrics["params"].append(params)
+            metrics["sample-loss"].append(sample_loss.tolist())
 
         if dist.is_main_process() and it % cfg.logger_freq == 0:
             board.add_scalar("training loss", loss.item(), it)
@@ -236,12 +211,12 @@ def get_args_parser():
 
     # MinSim parameters:
     p.add_argument("--num_crops", default=2, type=int, help="Number of crops")
-    p.add_argument("--select_fn", default="no_minsim", type=str, choices=select_crops.names)
+    p.add_argument("--select_fn", default="identity", type=str)
 
     # Misc
     p.add_argument('--fp16', default=True, type=utils.bool_flag,
                    help="Whether or not to use half precision for training. (default: True)")
-    p.add_argument('--output_dir', type=str,
+    p.add_argument('--output_dir', default=".", type=str,
                    help='Path to save logs and checkpoints.')
     p.add_argument('--saveckp_freq', default=0, type=int,
                    help='Save checkpoint every x epochs.')

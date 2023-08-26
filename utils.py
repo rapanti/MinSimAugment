@@ -10,13 +10,10 @@ import torch
 import torch.nn as nn
 import torch.distributed
 
-import distributed as dist
+from utils import dist as dist
 
 
 def fix_random_seeds(seed=0):
-    """
-    Fix random seeds.
-    """
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
     np.random.seed(seed)

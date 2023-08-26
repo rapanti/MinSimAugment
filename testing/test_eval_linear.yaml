@@ -13,7 +13,7 @@ output_dir: exp
 val_freq: 1
 logger_freq: 50
 dist_url: env://
-dist_backend: nccl  # gloo
+dist_backend: gloo  # gloo
 num_workers: 8
 arch: resnet18
 data_path: ..\datasets\CIFAR10  # /data/datasets/ImageNet/imagenet-pytorch
