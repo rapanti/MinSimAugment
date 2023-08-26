@@ -4,7 +4,7 @@ from typing import Sequence, Tuple
 
 from torchvision.transforms import CenterCrop, ColorJitter, Compose, GaussianBlur, InterpolationMode,  \
     Normalize, RandomApply, RandomGrayscale, RandomHorizontalFlip, RandomResizedCrop, Resize, ToTensor
-from torchvision.datasets import CIFAR10, CIFAR100, ImageFolder
+from torchvision.datasets import CIFAR10, CIFAR100, ImageFolder, VOCDetection, INaturalist, Places365
 
 IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
@@ -103,11 +103,21 @@ def make_dataset(
         transform):
     if dataset == 'CIFAR10':
         return CIFAR10(root, download=True, train=train, transform=transform), 10
-    if dataset == 'CIFAR100':
+    elif dataset == 'CIFAR100':
         return CIFAR100(root, download=True, train=train, transform=transform), 100
     elif dataset == 'ImageNet':
         root = os.path.join(root, 'train' if train else 'val')
         dataset = ImageFolder(root, transform=transform)
         return dataset, 1000
-    print(f"Does not support dataset: {dataset}")
-    sys.exit(1)
+    elif dataset == "inat18":
+        return INaturalist(root, download=True, version="2018", transform=transform), 8142
+    elif dataset == "Places365":
+        split = "train-standard" if train else "val"
+        return Places365(root, download=True, split=split, transform=transform), 365
+    elif dataset == "VOC2007":
+        # We compute the empirical mean average precision
+        return NotImplementedError
+
+    else:
+        print(f"Does not support dataset: {dataset}")
+        sys.exit(1)
