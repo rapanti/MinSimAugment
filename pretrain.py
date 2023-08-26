@@ -174,9 +174,9 @@ def train(loader, model, optimizer, epoch, cfg, fp16, board):
 
         metrics["loss"].append(loss.item())
         metrics["lr"].append(optimizer.param_groups[0]["lr"])
-        if cfg.use_adv_metric and it % cfg.adv_metric_freq == 0:
+        # if cfg.use_adv_metric and it % cfg.adv_metric_freq == 0:
             # metrics["selected"].append(selected.tolist())
-            metrics["params"].append(params)
+            # metrics["params"].append(params)
             # metrics["sample-loss"].append(sample_loss.tolist())
 
         if dist.is_main_process() and it % cfg.logger_freq == 0:
@@ -215,13 +215,13 @@ def get_args_parser():
                             "resnet18", "resnet34", "resnet50", "resnet101", "resnet152",
                             "resnet18_cifar", "resnet34_cifar", "resnet50_cifar", "resnet101_cifar", "resnet152_cifar"],
                    help="Name of architecture to train (default: resnet50)")
-    p.add_argument('--epochs', type=int,
-                   help='number of total epochs to run (default: 100)')
+    p.add_argument('--epochs', type=int, default=300,
+                   help='number of total epochs to run (default: 300)')
     p.add_argument('-b', '--batch_size', default=2048, type=int,
                    help='total batch-size (default: 2048)')
 
-    p.add_argument('--wd', '--weight_decay', default=1e-6, dest="weight_decay", type=float,
-                   help='weight decay (default: 1e-6)')
+    p.add_argument('--wd', '--weight_decay', default=1.5e-6, dest="weight_decay", type=float,
+                   help='weight decay (default: 1.5e-6)')
 
     # BT specific parameters:
     p.add_argument('--lambd', default=0.0051, type=float, metavar='L',

@@ -10,10 +10,10 @@ dim: 2048
 epochs: 800
 fix_pred_lr: true
 hflip_prob: 0.5
-lr: 0.06
+lr: 0.0
 momentum: 0.9
 pred_dim: 512
-weight_decay: 0.0005
+weight_decay: 1.5e-6
 select_fn: identity
 data_path: /work/dlclarge1/ferreira-simsiam/simsiam/datasets/CIFAR10 #../datasets/CIFAR10  # /data/datasets/ImageNet/imagenet-pytorch
 output_dir: exp
