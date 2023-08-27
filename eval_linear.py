@@ -9,16 +9,16 @@ import torch
 import torch.nn as nn
 import torch.nn.parallel
 import torch.backends.cudnn as cudnn
-import torch.optim
+from torch import optim
 import torch.utils.data
 import torch.utils.data.distributed
 from omegaconf import OmegaConf
 from torch.utils.tensorboard import SummaryWriter
 
 import data
-from utils import distributed as dist, optimizers
+from utils import distributed as dist
 import utils
-from builder import BarlowTwins
+from torchvision import models
 
 
 def main(cfg):
@@ -33,6 +33,7 @@ def main(cfg):
         mean, std = data.CIFAR10_DEFAULT_MEAN, data.CIFAR10_DEFAULT_STD
     else:
         mean, std = data.IMAGENET_DEFAULT_MEAN, data.IMAGENET_DEFAULT_STD
+
     val_transform = data.make_classification_val_transform(
         resize_size=cfg.resize_size,
         crop_size=cfg.crop_size,
@@ -75,36 +76,31 @@ def main(cfg):
         print(f"Unknown architecture: {cfg.arch}")
         sys.exit(1)
 
-    model = BarlowTwins(cfg).cuda()
+    model = models.resnet50().cuda()
 
-    # freeze all layers but the last fc
-    for name, param in model.named_parameters():
-        if name not in ['fc.weight', 'fc.bias']:
-            param.requires_grad = False
-    # init the fc layer
+    state_dict = torch.load(cfg.pretrained, map_location='cpu')
+    missing_keys, unexpected_keys = model.load_state_dict(state_dict, strict=False)
+    assert missing_keys == ['fc.weight', 'fc.bias'] and unexpected_keys == []
     model.fc.weight.data.normal_(mean=0.0, std=0.01)
     model.fc.bias.data.zero_()
-    # optimize only the linear classifier
-    parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
-    assert len(parameters) == 2  # fc.weight, fc.bias
 
-    # load from pre-trained, before DistributedDataParallel constructor
-    utils.load_pretrained_weights(model, cfg.pretrained, cfg.ckp_key)
+    model.requires_grad_(False)
+    model.fc.requires_grad_(True)
+    classifier_parameters, model_parameters = [], []
+    for name, param in model.named_parameters():
+        if name in {'fc.weight', 'fc.bias'}:
+            classifier_parameters.append(param)
+        else:
+            model_parameters.append(param)
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[cfg.gpu])
 
     # define loss function (criterion) and optimizer
     criterion = nn.CrossEntropyLoss().cuda()
 
-    # infer learning rate before changing batch size
-    init_lr = cfg.lr * cfg.batch_size / 256
-    if cfg.lars:
-        optimizer = optimizers.LARS(parameters, init_lr,
-                                    momentum=cfg.momentum,
-                                    weight_decay=cfg.weight_decay)
-    else:
-        optimizer = torch.optim.SGD(parameters, init_lr,
-                                    momentum=cfg.momentum,
-                                    weight_decay=cfg.weight_decay)
+    param_groups = [dict(params=classifier_parameters, lr=cfg.lr)]
+
+    optimizer = optim.SGD(param_groups, 0, momentum=0.9, weight_decay=cfg.weight_decay)
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, cfg.epochs)
 
     log_dir = os.path.join(cfg.output_dir, "tensorboard")
     board = SummaryWriter(log_dir) if dist.is_main_process() else None
@@ -116,16 +112,18 @@ def main(cfg):
         run_variables=to_restore,
         model=model,
         optimizer=optimizer,
+        scheduler=scheduler,
     )
     start_epoch = to_restore["epoch"]
     best_acc = to_restore["best_acc"]
 
     for epoch in range(start_epoch, cfg.epochs):
+
+        model.eval()
         sampler.set_epoch(epoch)
-        adjust_learning_rate(optimizer, init_lr, epoch, cfg)
 
         # train for one epoch
-        train_stats = train(train_loader, model, criterion, optimizer, epoch, cfg, board)
+        train_stats = train(train_loader, model, criterion, optimizer, epoch, cfg, board, scheduler)
         log_stats = {**{f'train_{k}': v for k, v in train_stats.items()}, 'epoch': epoch}
 
         # evaluate on validation set
@@ -151,6 +149,7 @@ def main(cfg):
                 "model": model.state_dict(),
                 "optimizer": optimizer.state_dict(),
                 "best_acc": best_acc,
+                "scheduler": scheduler,
             }
             path = os.path.join(cfg.output_dir, "checkpoint.pth.tar")
             torch.save(save_dict, path)
@@ -159,10 +158,10 @@ def main(cfg):
           "Top-1 test accuracy: {acc:.1f}".format(acc=best_acc))
 
 
-def train(loader, model, criterion, optimizer, epoch, cfg, board):
+def train(loader, model, criterion, optimizer, epoch, cfg, board, scheduler):
     metric_logger = utils.MetricLogger(delimiter=" ")
     header = 'Epoch: [{}/{}]'.format(epoch, cfg.epochs)
-    model.eval()
+
     for it, (images, targets) in enumerate(metric_logger.log_every(loader, 10, header)):
         it = len(loader) * epoch + it
 
@@ -192,6 +191,13 @@ def train(loader, model, criterion, optimizer, epoch, cfg, board):
             board.add_scalar(tag="eval acc1", scalar_value=acc1, global_step=it)
             board.add_scalar(tag="eval loss", scalar_value=loss.item(), global_step=it)
 
+    # sanity check
+    reference_state_dict = torch.load(cfg.pretrained, map_location='cpu')
+    model_state_dict = model.module.state_dict()
+    for k in reference_state_dict:
+        assert torch.equal(model_state_dict[k].cpu(), reference_state_dict[k]), k
+
+    scheduler.step()
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
@@ -227,13 +233,6 @@ def validate(loader, model, criterion):
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 
-def adjust_learning_rate(optimizer, init_lr, epoch, args):
-    """Decay the learning rate based on schedule"""
-    cur_lr = init_lr * 0.5 * (1. + math.cos(math.pi * epoch / args.epochs))
-    for param_group in optimizer.param_groups:
-        param_group['lr'] = cur_lr
-
-
 def get_args_parser():
     p = argparse.ArgumentParser(description='PyTorch Eval-Linear ImageNet', add_help=False)
     p.add_argument('--dataset', default="ImageNet", type=str,
@@ -244,20 +243,18 @@ def get_args_parser():
                    help="Name of architecture to train (default: resnet50)")
     p.add_argument('--epochs', type=int,
                    help='number of total epochs to run (default: 90)')
-    p.add_argument('-b', '--batch-size', type=int,
-                   help='total-batch-size (default: 4096)')
-    p.add_argument('--lr', type=float,
-                   help='initial (base) learning rate (default: 0.1)')
+    p.add_argument('-b', '--batch-size', type=int, default=256,
+                   help='total-batch-size (default: 256)')
+    p.add_argument('--lr', type=float, default=0.3,
+                   help='initial (base) learning rate (default: 0.3) for the classifier')
     p.add_argument('--momentum', type=float,
                    help='momentum (default: 0.9)')
-    p.add_argument('--wd', '--weight_decay', type=float, dest='weight_decay',
-                   help='weight decay (default: 0.)')
+    p.add_argument('--wd', '--weight_decay', default=1e-6, type=float, dest='weight_decay',
+                   help='weight decay (default: 1-6)')
     p.add_argument('--resize_size', type=int,
                    help="Resize size of images before center-crop (default: 256)")
     p.add_argument('--crop_size', type=int,
                    help="Size of center-crop (default: 224)")
-    p.add_argument('--lars', default=True, type=utils.bool_flag,
-                   help="Whether or not to use LARS optimizer (default: True)")
 
     # additional configs:
     p.add_argument('--pretrained', default="checkpoint.pth", type=str,

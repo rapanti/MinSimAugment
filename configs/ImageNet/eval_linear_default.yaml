@@ -1,10 +1,9 @@
-batch_size: 4096
+batch_size: 256
 ckp_key: model
 crop_size: 224
 dataset: ImageNet
 epochs: 90
-lars: true
-lr: 0.1
+lr: 0.3
 momentum: 0.9
 resize_size: 256
-weight_decay: 0.0
+weight_decay: 1e-6
