@@ -86,7 +86,7 @@ def main(cfg):
     sampler = DistributedSampler(dataset)
     assert cfg.batch_size % dist.get_world_size() == 0
     cfg.batch_size_per_gpu = cfg.batch_size // cfg.grad_accum_steps // dist.get_world_size()
-
+    print(f"{cfg.batch_size_per_gpu=}")
     loader = DataLoader(
         dataset,
         sampler=sampler,
