@@ -85,7 +85,7 @@ def main(cfg):
     dataset, _ = data.make_dataset(cfg.data_path, cfg.dataset, train=True, transform=Transform())
     sampler = DistributedSampler(dataset)
     assert cfg.batch_size % dist.get_world_size() == 0
-    cfg.batch_size_per_gpu = cfg.batch_size // dist.get_world_size()
+    cfg.batch_size_per_gpu = cfg.batch_size // cfg.grad_accum_steps // dist.get_world_size()
 
     loader = DataLoader(
         dataset,
@@ -144,6 +144,7 @@ def train(loader, model, optimizer, epoch, cfg, fp16, board):
     metric_logger = utils.MetricLogger(delimiter=" ")
     header = 'Epoch: [{}/{}]'.format(epoch, cfg.epochs)
 
+    total_loss = 0
     for it, (images, _) in enumerate(metric_logger.log_every(loader, cfg.print_freq, header)):
         it = len(loader) * epoch + it  # global training iteration
 
@@ -156,32 +157,37 @@ def train(loader, model, optimizer, epoch, cfg, fp16, board):
         optimizer.zero_grad()
         with torch.cuda.amp.autocast(fp16 is not None):
             loss = model.forward(images[0], images[1])
-            # p1, p2, z1, z2 = model(x1=x1, x2=x2)
-            # loss = -(criterion(p1, z2).mean() + criterion(p2, z1).mean()) * 0.5
+            loss /= cfg.grad_accum_steps
+            total_loss += loss.detach()
 
-        if fp16 is None:
-            loss.backward()
-            optimizer.step()
-        else:
-            fp16.scale(loss).backward()
-            fp16.step(optimizer)
-            fp16.update()
+        if not (it+1) % cfg.grad_accum_steps:
+            if fp16 is None:
+                loss.backward()
+                optimizer.step()
+            else:
+                fp16.scale(loss).backward()
+                fp16.step(optimizer)
+                fp16.update()
 
-        # logging
-        torch.cuda.synchronize()
-        metric_logger.update(loss=loss.item())
-        metric_logger.update(lr=optimizer.param_groups[0]["lr"])
+            # logging
+            torch.cuda.synchronize()
+            metric_logger.update(loss=total_loss.item())
+            metric_logger.update(lr=optimizer.param_groups[0]["lr"])
 
-        metrics["loss"].append(loss.item())
-        metrics["lr"].append(optimizer.param_groups[0]["lr"])
-        # if cfg.use_adv_metric and it % cfg.adv_metric_freq == 0:
-            # metrics["selected"].append(selected.tolist())
-            # metrics["params"].append(params)
-            # metrics["sample-loss"].append(sample_loss.tolist())
+            metrics["loss"].append(total_loss.item())
+            metrics["lr"].append(optimizer.param_groups[0]["lr"])
 
-        if dist.is_main_process() and it % cfg.logger_freq == 0:
-            board.add_scalar("training loss", loss.item(), it)
-            board.add_scalar("training lr", optimizer.param_groups[0]["lr"], it)
+            if dist.is_main_process() and it % cfg.logger_freq == 0:
+                log_step = it // cfg.grad_accum_steps
+                # if cfg.use_adv_metric and not log_step % cfg.adv_metric_freq:
+                #     metrics["selected"].append(selected.tolist())
+                #     metrics["params"].append(params)
+                #     metrics["sample-loss"].append(sample_loss.tolist())
+
+                board.add_scalar("training loss", total_loss.item(), it)
+                board.add_scalar("training lr", optimizer.param_groups[0]["lr"], it)
+
+            total_loss = 0
 
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
@@ -270,6 +276,10 @@ def get_args_parser():
                    help="Log advanced metrics: transforms params, crop selection, sample-loss, ... (default: False)")
     p.add_argument("--adv_metric_freq", default=10, type=int,
                    help="Log advanced metrics every x iterations (default: 100)")
+
+    p.add_argument("--grad_accum_steps", type=int,
+                   help="Gradient accumulation. Effective batch size is given batch size (default: 1)"
+                        "batch size per gpu = batch_size / grad_accum_steps / num_gpus")
 
     return p
 

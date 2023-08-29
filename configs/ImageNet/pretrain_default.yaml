@@ -26,3 +26,4 @@ lambd: 0.0051
 projector: 8192-8192-8192
 learning_rate_weights: 0.2
 learning_rate_biases: 0.0048
+grad_accum_steps: 1
