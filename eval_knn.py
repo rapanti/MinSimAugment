@@ -79,6 +79,7 @@ def extract_feature_pipeline(cfg):
         model = resnet_cifar.__dict__[cfg.arch](num_classes=0)
     elif cfg.arch in resnet.__dict__.keys():
         model = resnet.__dict__[cfg.arch](num_classes=0)
+        model.fc = nn.Identity()
     else:
         print(f"Unknown architecture: {cfg.arch}")
         sys.exit(1)
