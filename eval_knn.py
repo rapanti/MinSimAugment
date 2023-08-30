@@ -77,6 +77,7 @@ def extract_feature_pipeline(cfg):
         )
     elif cfg.arch in resnet_cifar.__dict__.keys():
         model = resnet_cifar.__dict__[cfg.arch](num_classes=0)
+        model.fc = nn.Identity()
     elif cfg.arch in resnet.__dict__.keys():
         model = resnet.__dict__[cfg.arch](num_classes=0)
         model.fc = nn.Identity()
