@@ -74,7 +74,7 @@ def main(cfg):
     print("=> creating model '{}'".format(cfg.arch))
     if cfg.arch in vits.__dict__.keys():
         model = vits.__dict__[cfg.arch](
-            img_size=cfg.img_size,
+            img_size=cfg.crop_size,
             patch_size=cfg.patch_size,
             num_classes=0,
         )
