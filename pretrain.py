@@ -44,6 +44,7 @@ def main(cfg):
     model = nn.parallel.DistributedDataParallel(model, device_ids=[cfg.gpu])
 
     init_lr = cfg.lr * cfg.batch_size / 256
+    # do not use ddp.module
     optimizer = model.module.configure_optimizers(cfg.fix_pred_lr, init_lr, momentum=cfg.momentum, weight_decay=cfg.weight_decay)
 
     fp16 = torch.cuda.amp.GradScaler() if cfg.fp16 else None
@@ -129,6 +130,7 @@ def train(loader, model, optimizer, epoch, cfg, fp16, board, ms_fn):
         images, selected, sample_loss = ms_fn(images, model, fp16)
 
         with torch.cuda.amp.autocast(fp16 is not None):
+            # DO NOT USE DDP.MODULE HERE !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
             loss = model.module.training_step(images, it)
 
         optimizer.zero_grad()
