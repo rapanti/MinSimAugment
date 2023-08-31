@@ -21,6 +21,22 @@ import utils
 
 from models import resnet_cifar, resnet, vision_transformer as vits
 
+class LinearClassifier(nn.Module):
+    """Linear layer to train on top of frozen features"""
+    def __init__(self, dim, num_labels=1000):
+        super(LinearClassifier, self).__init__()
+        self.num_labels = num_labels
+        self.linear = nn.Linear(dim, num_labels)
+        self.linear.weight.data.normal_(mean=0.0, std=0.01)
+        self.linear.bias.data.zero_()
+
+    def forward(self, x):
+        # flatten
+        x = x.view(x.size(0), -1)
+
+        # linear layer
+        return self.linear(x)
+
 
 def main(cfg):
     dist.init_distributed_mode(cfg) if not dist.is_enabled() else None
@@ -72,6 +88,7 @@ def main(cfg):
 
     # create model
     print("=> creating model '{}'".format(cfg.arch))
+    linear_classifier_vit = None
     if cfg.arch in vits.__dict__.keys():
         model = vits.__dict__[cfg.arch](
             img_size=cfg.crop_size,
@@ -79,31 +96,39 @@ def main(cfg):
             num_classes=0,
         )
         embed_dim = model.embed_dim * (cfg.n_last_blocks + int(cfg.avgpool))
-        model.fc = nn.Linear(embed_dim, cfg.num_labels)
-    elif cfg.arch in resnet_cifar.__dict__.keys():
-        model = resnet_cifar.__dict__[cfg.arch](num_classes=cfg.num_labels)
+        model.cuda()
+        # freeze all layers
+        for name, param in model.named_parameters():
+            param.requires_grad = False
+
+        # ViTs lacking model.fc, therefore create a classifier separately
+        linear_classifier_vit = LinearClassifier(embed_dim, num_labels=cfg.num_labels)
+        parameters = list(filter(lambda p: p.requires_grad, linear_classifier_vit.parameters()))
+        linear_classifier_vit = linear_classifier_vit.cuda()
+        linear_classifier_vit = nn.parallel.DistributedDataParallel(linear_classifier_vit, device_ids=[cfg.gpu])
+
     elif cfg.arch in resnet.__dict__.keys():
         model = resnet.__dict__[cfg.arch](num_classes=cfg.num_labels)
+        model.cuda()
+        # freeze all layers but the last fc
+        for name, param in model.named_parameters():
+            if name not in ['fc.weight', 'fc.bias']:
+                param.requires_grad = False
+        # init the fc layer
+        model.fc.weight.data.normal_(mean=0.0, std=0.01)
+        model.fc.bias.data.zero_()
+        # optimize only the linear classifier
+        parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
+        assert len(parameters) == 2  # fc.weight, fc.bias
     else:
         print(f"Unknown architecture: {cfg.arch}")
         sys.exit(1)
 
-    model.cuda()
-
-    # freeze all layers but the last fc
-    for name, param in model.named_parameters():
-        if name not in ['fc.weight', 'fc.bias']:
-            param.requires_grad = False
-    # init the fc layer
-    model.fc.weight.data.normal_(mean=0.0, std=0.01)
-    model.fc.bias.data.zero_()
-    # optimize only the linear classifier
-    parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
-    assert len(parameters) == 2  # fc.weight, fc.bias
-
     # load from pre-trained, before DistributedDataParallel constructor
     utils.load_pretrained_weights(model, cfg.pretrained, cfg.ckp_key)
-    model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[cfg.gpu])
+    if cfg.arch not in vits.__dict__.keys():
+        # for ViTs we have a separate linear classifier that uses DDP
+        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[cfg.gpu])
 
     # define loss function (criterion) and optimizer
     criterion = nn.CrossEntropyLoss().cuda()
@@ -129,6 +154,7 @@ def main(cfg):
         run_variables=to_restore,
         model=model,
         optimizer=optimizer,
+        linear_classifier_vit=linear_classifier_vit
     )
     start_epoch = to_restore["epoch"]
     best_acc = to_restore["best_acc"]
@@ -138,12 +164,12 @@ def main(cfg):
         adjust_learning_rate(optimizer, init_lr, epoch, cfg)
 
         # train for one epoch
-        train_stats = train(train_loader, model, criterion, optimizer, epoch, cfg, board)
+        train_stats = train(train_loader, model, criterion, optimizer, epoch, cfg, board, linear_classifier_vit)
         log_stats = {**{f'train_{k}': v for k, v in train_stats.items()}, 'epoch': epoch}
 
         # evaluate on validation set
         if epoch % cfg.val_freq == 0 or epoch == cfg.epochs - 1:
-            test_stats = validate(val_loader, model, criterion)
+            test_stats = validate(val_loader, model, criterion, cfg, linear_classifier_vit)
             print(f"Accuracy at epoch {epoch} of the network on the {len(val_data)} test images: "
                   f"{test_stats['acc1']:.1f}%")
             # remember best acc@1 and save checkpoint
@@ -164,6 +190,7 @@ def main(cfg):
                 "model": model.state_dict(),
                 "optimizer": optimizer.state_dict(),
                 "best_acc": best_acc,
+                "linear_classifier_vit": linear_classifier_vit.state_dict(),
             }
             path = os.path.join(cfg.output_dir, "checkpoint.pth.tar")
             torch.save(save_dict, path)
@@ -172,10 +199,12 @@ def main(cfg):
           "Top-1 test accuracy: {acc:.1f}".format(acc=best_acc))
 
 
-def train(loader, model, criterion, optimizer, epoch, cfg, board):
+def train(loader, model, criterion, optimizer, epoch, cfg, board, linear_classifier_vit):
     metric_logger = utils.MetricLogger(delimiter=" ")
     header = 'Epoch: [{}/{}]'.format(epoch, cfg.epochs)
     model.eval()
+    if linear_classifier_vit:
+        linear_classifier_vit.train()
     for it, (images, targets) in enumerate(metric_logger.log_every(loader, 10, header)):
         it = len(loader) * epoch + it
 
@@ -183,7 +212,18 @@ def train(loader, model, criterion, optimizer, epoch, cfg, board):
         targets = targets.cuda(non_blocking=True)
 
         # compute output
-        output = model(images)
+        if "vit" in cfg.arch:
+            intermediate_output = model.get_intermediate_layers(images, cfg.n_last_blocks)
+            output = torch.cat([x[:, 0] for x in intermediate_output], dim=-1)
+            if cfg.avgpool:
+                output = torch.cat(
+                    (output.unsqueeze(-1), torch.mean(intermediate_output[-1][:, 1:], dim=1).unsqueeze(-1)), dim=-1)
+                output = output.reshape(output.shape[0], -1)
+
+            output = linear_classifier_vit(output)
+        else:
+            output = model(images)
+
         loss = criterion(output, targets)
 
         # compute gradient and do SGD step
@@ -210,9 +250,11 @@ def train(loader, model, criterion, optimizer, epoch, cfg, board):
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 
-def validate(loader, model, criterion):
+def validate(loader, model, criterion, cfg, linear_classifier_vit):
     # switch to evaluate mode
     model.eval()
+    if linear_classifier_vit:
+        linear_classifier_vit.eval()
 
     metric_logger = utils.MetricLogger(delimiter=" ")
     header = 'Test:'
@@ -222,7 +264,18 @@ def validate(loader, model, criterion):
             target = target.cuda(non_blocking=True)
 
             # compute output
-            output = model(images)
+            if "vit" in cfg.arch:
+                intermediate_output = model.get_intermediate_layers(images, cfg.n_last_blocks)
+                output = torch.cat([x[:, 0] for x in intermediate_output], dim=-1)
+                if cfg.avgpool:
+                    output = torch.cat(
+                        (output.unsqueeze(-1), torch.mean(intermediate_output[-1][:, 1:], dim=1).unsqueeze(-1)),
+                        dim=-1)
+                    output = output.reshape(output.shape[0], -1)
+
+                output = linear_classifier_vit(output)
+            else:
+                output = model(images)
             loss = criterion(output, target)
 
             # measure accuracy and record loss
@@ -240,9 +293,9 @@ def validate(loader, model, criterion):
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 
-def adjust_learning_rate(optimizer, init_lr, epoch, args):
+def adjust_learning_rate(optimizer, init_lr, epoch, cfg):
     """Decay the learning rate based on schedule"""
-    cur_lr = init_lr * 0.5 * (1. + math.cos(math.pi * epoch / args.epochs))
+    cur_lr = init_lr * 0.5 * (1. + math.cos(math.pi * epoch / cfg.epochs))
     for param_group in optimizer.param_groups:
         param_group['lr'] = cur_lr
 
@@ -289,6 +342,8 @@ def get_args_parser():
                    help="distributed backend (default: nccl)")
     p.add_argument('--num_workers', default=8, type=int,
                    help="number of data loading workers (default: 8)")
+    p.add_argument('--n_last_blocks', default=4, type=int, help="""Concatenate [CLS] tokens
+            for the `n` last blocks. We use `n=4` when evaluating ViT-Small and `n=1` with ViT-Base.""")
 
     return p
 

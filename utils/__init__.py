@@ -9,6 +9,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.distributed
+from models.vision_transformer import VisionTransformer
 
 from . import distributed as dist
 
@@ -284,8 +285,8 @@ def load_pretrained_weights(model, pretrained_weights, checkpoint_key):
             del state_dict[k]
 
         msg = model.load_state_dict(state_dict, strict=False)
-        assert set(msg.missing_keys) == {"fc.weight", "fc.bias"}
-
+        if not isinstance(model, VisionTransformer):
+            assert set(msg.missing_keys) == {"fc.weight", "fc.bias"}
         print('Pretrained weights found at {} and loaded with msg: {}'.format(pretrained_weights, msg))
     else:
         print("=> no checkpoint found at '{}'".format(pretrained_weights))

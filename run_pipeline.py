@@ -12,9 +12,8 @@ if __name__ == "__main__":
     utils.distributed.init_distributed_mode(cfg)
     utils.fix_random_seeds(cfg.seed)
 
-
     print('STARTING PRETRAINING')
-    pretrain.main(cfg)
+    # pretrain.main(cfg)
 
     eval_cfg = OmegaConf.load('eval_linear.yaml')
     # copy dist parameters
