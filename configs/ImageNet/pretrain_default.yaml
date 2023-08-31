@@ -22,3 +22,4 @@ num_crops: 2
 # Misc parameters
 data_path: null
 output_dir: null
+optimizer: sgd

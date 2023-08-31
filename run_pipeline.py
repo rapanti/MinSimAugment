@@ -13,12 +13,13 @@ if __name__ == "__main__":
     utils.fix_random_seeds(cfg.seed)
 
     print('STARTING PRETRAINING')
-    # pretrain.main(cfg)
+    pretrain.main(cfg)
 
     eval_cfg = OmegaConf.load('eval_linear.yaml')
     # copy dist parameters
     eval_cfg.gpu = cfg.gpu
     eval_cfg.rank = cfg.rank
     eval_cfg.world_size = cfg.world_size
+
     print('STARTING EVALUATION')
     eval_linear.main(eval_cfg)

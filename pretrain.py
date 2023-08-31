@@ -92,7 +92,10 @@ def main(cfg):
     else:
         optim_params = model.parameters()
 
-    optimizer = torch.optim.SGD(optim_params, init_lr, momentum=cfg.momentum, weight_decay=cfg.weight_decay)
+    if cfg.optimizer == "SGD":
+        optimizer = torch.optim.SGD(optim_params, init_lr, momentum=cfg.momentum, weight_decay=cfg.weight_decay)
+    elif cfg.optimizer == "adamw":
+        optimizer = torch.optim.AdamW(optim_params, init_lr, weight_decay=cfg.weight_decay)  # to use with ViTs
 
     fp16 = torch.cuda.amp.GradScaler() if cfg.fp16 else None
 
@@ -257,6 +260,9 @@ def get_args_parser():
                    help='momentum of SGD solver (default: 0.9)')
     p.add_argument('--wd', '--weight_decay', dest="weight_decay", type=float,
                    help='weight decay (default: 1e-4)')
+    p.add_argument('--optimizer', default='sgd', type=str,
+                        choices=['adamw', 'sgd'],
+                        help="""Type of optimizer. We recommend using adamw with ViTs.""")
 
     # simsiam specific parameters:
     p.add_argument('--dim', type=int,
