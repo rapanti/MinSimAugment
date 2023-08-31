@@ -26,5 +26,5 @@ ckp_key: teacher
 pretrained: exp/checkpoint.pth
 log_freq: 50
 num_workers: 8
-output_dir: .
+output_dir: exp
 val_freq: 1

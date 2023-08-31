@@ -41,11 +41,10 @@ def main(cfg):
     val_data, cfg.num_labels = data.make_dataset(cfg.data_path, cfg.dataset, False, val_transform)
 
     sampler = torch.utils.data.SequentialSampler(val_data)
-    cfg.batch_size_per_gpu = cfg.batch_size // dist.get_world_size()
     val_loader = torch.utils.data.DataLoader(
         val_data,
         sampler=sampler,
-        batch_size=cfg.batch_size_per_gpu,
+        batch_size=cfg.batch_size,
         num_workers=cfg.num_workers,
         pin_memory=True,
         drop_last=False
@@ -58,11 +57,12 @@ def main(cfg):
     )
     train_data, _ = data.make_dataset(cfg.data_path, cfg.dataset, True, train_transform)
 
+    batch_size_per_gpu = cfg.batch_size // dist.get_world_size()
     sampler = torch.utils.data.distributed.DistributedSampler(train_data)
     train_loader = torch.utils.data.DataLoader(
         train_data,
         sampler=sampler,
-        batch_size=cfg.batch_size_per_gpu,
+        batch_size=batch_size_per_gpu,
         num_workers=cfg.num_workers,
         pin_memory=True,
     )
@@ -77,31 +77,32 @@ def main(cfg):
             num_classes=0,
         )
         embed_dim = model.embed_dim * (cfg.n_last_blocks + int(cfg.avgpool))
-        model.fc = nn.Linear(embed_dim, cfg.num_labels)
+        model.fc = nn.Identity()
     elif cfg.arch in resnet_cifar.__dict__.keys():
         model = resnet_cifar.__dict__[cfg.arch](num_classes=cfg.num_labels)
+        embed_dim = model.fc.in_features
+        model.fc = nn.Identity()
     elif cfg.arch in resnet.__dict__.keys():
         model = resnet.__dict__[cfg.arch](num_classes=cfg.num_labels)
+        embed_dim = model.fc.in_features
+        model.fc = nn.Identity()
     else:
         print(f"Unknown architecture: {cfg.arch}")
         sys.exit(1)
     model.cuda()
+    model.eval()
 
-    # freeze all layers but the last fc
-    for name, param in model.named_parameters():
-        if name not in ['fc.weight', 'fc.bias']:
-            param.requires_grad = False
-    # init the fc layer
-    model.fc.weight.data.normal_(mean=0.0, std=0.01)
-    model.fc.bias.data.zero_()
+    for p in model.parameters():
+        p.requires_grad = False
 
-    # optimize only the linear classifier
-    parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
-    assert len(parameters) == 2  # fc.weight, fc.bias
-
-    # load from pre-trained, before DistributedDataParallel constructor
+    # load weights to evaluate
     utils.load_pretrained_weights(model, cfg.pretrained, cfg.ckp_key)
-    model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[cfg.gpu])
+    print(f"Model {cfg.arch} built.")
+
+    # init the fc layer
+    linear_classifier = LinearClassifier(embed_dim, num_labels=cfg.num_labels)
+    linear_classifier = linear_classifier.cuda()
+    linear_classifier = nn.parallel.DistributedDataParallel(linear_classifier, device_ids=[cfg.gpu])
 
     # define loss function (criterion) and optimizer
     criterion = nn.CrossEntropyLoss().cuda()
@@ -109,15 +110,15 @@ def main(cfg):
     # infer learning rate
     init_lr = cfg.lr * cfg.batch_size / 256
     if cfg.optimizer == "lars":
-        optimizer = optimizers.LARS(parameters, init_lr,
+        optimizer = optimizers.LARS(linear_classifier.parameters(), init_lr,
                                     momentum=cfg.momentum,
                                     weight_decay=cfg.weight_decay)
     elif cfg.optimizer == "sgd":
-        optimizer = torch.optim.SGD(parameters, init_lr,
+        optimizer = torch.optim.SGD(linear_classifier.parameters(), init_lr,
                                     momentum=cfg.momentum,
                                     weight_decay=cfg.weight_decay)
     elif cfg.optimizer == "adamw":
-        optimizer = torch.optim.AdamW(parameters, init_lr,
+        optimizer = torch.optim.AdamW(linear_classifier.parameters(), init_lr,
                                       weight_decay=cfg.weight_decay)
     else:
         raise ValueError(f"Unknown optimizer: {cfg.optimizer}")
@@ -132,24 +133,24 @@ def main(cfg):
     utils.restart_from_checkpoint(
         os.path.join(cfg.output_dir, "checkpoint.pth.tar"),
         run_variables=to_restore,
-        model=model,
+        linear_classifier=linear_classifier,
         optimizer=optimizer,
     )
     start_epoch = to_restore["epoch"]
     best_acc = to_restore["best_acc"]
 
     for epoch in range(start_epoch, cfg.epochs):
-        sampler.set_epoch(epoch)
+        train_loader.sampler.set_epoch(epoch)
 
         # train for one epoch
-        train_stats = train(train_loader, model, criterion, optimizer, epoch, cfg, board)
+        train_stats = train(train_loader, model, linear_classifier, criterion, optimizer, epoch, cfg, board)
         log_stats = {**{f'train_{k}': v for k, v in train_stats.items()}, 'epoch': epoch}
 
         scheduler.step()
 
         # evaluate on validation set
         if epoch % cfg.val_freq == 0 or epoch == cfg.epochs - 1:
-            test_stats = validate(val_loader, model, criterion, cfg)
+            test_stats = validate(val_loader, model, linear_classifier, criterion, cfg)
             print(f"Accuracy at epoch {epoch} of the network on the {len(val_data)} test images: "
                   f"{test_stats['acc1']:.1f}%")
             # remember best acc@1 and save checkpoint
@@ -178,10 +179,12 @@ def main(cfg):
           "Top-1 test accuracy: {acc:.1f}".format(acc=best_acc))
 
 
-def train(loader, model, criterion, optimizer, epoch, cfg, board):
+def train(loader, model, linear_classifier, criterion, optimizer, epoch, cfg, board):
+    # switch to train mode
+    linear_classifier.train()
+
     metric_logger = utils.MetricLogger(delimiter=" ")
     header = 'Epoch: [{}/{}]'.format(epoch, cfg.epochs)
-    model.eval()
     for it, (images, targets) in enumerate(metric_logger.log_every(loader, 10, header)):
         it = len(loader) * epoch + it
 
@@ -189,19 +192,20 @@ def train(loader, model, criterion, optimizer, epoch, cfg, board):
         targets = targets.cuda(non_blocking=True)
 
         # compute output
-        if "vit" in cfg.arch:
-            intermediate_output = model.module.get_intermediate_layers(images, cfg.n_last_blocks)
-            output = torch.cat([x[:, 0] for x in intermediate_output], dim=-1)
-            if cfg.avgpool:
-                output = torch.cat(
-                    (output.unsqueeze(-1), torch.mean(intermediate_output[-1][:, 1:], dim=1).unsqueeze(-1)), dim=-1)
-                output = output.reshape(output.shape[0], -1)
-            output = model.module.fc(output)
-        else:
-            output = model(images)
+        with torch.no_grad():
+            if "vit" in cfg.arch:
+                intermediate_output = model.get_intermediate_layers(images, cfg.n_last_blocks)
+                output = torch.cat([x[:, 0] for x in intermediate_output], dim=-1)
+                if cfg.avgpool:
+                    output = torch.cat((output.unsqueeze(-1), torch.mean(intermediate_output[-1][:, 1:], dim=1).unsqueeze(-1)), dim=-1)
+                    output = output.reshape(output.shape[0], -1)
+            else:
+                output = model(images)
+
+        output = linear_classifier(output)
         loss = criterion(output, targets)
 
-        # compute gradient and do SGD step
+        # compute gradient and do optimizer step
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
@@ -226,9 +230,10 @@ def train(loader, model, criterion, optimizer, epoch, cfg, board):
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 
-def validate(loader, model, criterion, cfg):
+@torch.no_grad()
+def validate(loader, model, linear_classifier, criterion, cfg):
     # switch to evaluate mode
-    model.eval()
+    linear_classifier.eval()
 
     metric_logger = utils.MetricLogger(delimiter=" ")
     header = 'Test:'
@@ -237,17 +242,17 @@ def validate(loader, model, criterion, cfg):
             images = images.cuda(non_blocking=True)
             target = target.cuda(non_blocking=True)
 
-            # compute output
-            if "vit" in cfg.arch:
-                intermediate_output = model.module.get_intermediate_layers(images, cfg.n_last_blocks)
-                output = torch.cat([x[:, 0] for x in intermediate_output], dim=-1)
-                if cfg.avgpool:
-                    output = torch.cat(
-                        (output.unsqueeze(-1), torch.mean(intermediate_output[-1][:, 1:], dim=1).unsqueeze(-1)), dim=-1)
-                    output = output.reshape(output.shape[0], -1)
-                output = model.module.fc(output)
-            else:
-                output = model(images)
+            with torch.no_grad():
+                if "vit" in cfg.arch:
+                    intermediate_output = model.get_intermediate_layers(images, cfg.n_last_blocks)
+                    output = torch.cat([x[:, 0] for x in intermediate_output], dim=-1)
+                    if cfg.avgpool:
+                        output = torch.cat((output.unsqueeze(-1), torch.mean(intermediate_output[-1][:, 1:], dim=1).unsqueeze(-1)), dim=-1)
+                        output = output.reshape(output.shape[0], -1)
+                else:
+                    output = model(images)
+
+            output = linear_classifier(output)
             loss = criterion(output, target)
 
             # measure accuracy and record loss
@@ -263,6 +268,23 @@ def validate(loader, model, criterion, cfg):
               .format(top1=metric_logger.acc1, top5=metric_logger.acc5, losses=metric_logger.loss))
 
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+
+
+class LinearClassifier(nn.Module):
+    """Linear layer to train on top of frozen features"""
+    def __init__(self, dim, num_labels=1000):
+        super(LinearClassifier, self).__init__()
+        self.num_labels = num_labels
+        self.linear = nn.Linear(dim, num_labels)
+        self.linear.weight.data.normal_(mean=0.0, std=0.01)
+        self.linear.bias.data.zero_()
+
+    def forward(self, x):
+        # flatten
+        x = x.view(x.size(0), -1)
+
+        # linear layer
+        return self.linear(x)
 
 
 def get_args_parser():
