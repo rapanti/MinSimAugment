@@ -33,3 +33,23 @@ if __name__ == "__main__":
     eval_knn_cfg.dist_url = cfg.dist_url
 
     eval_knn.main(eval_knn_cfg)
+
+    print('STARTING LINEAR EVAL EVALUATION FLOWERS')
+    eval_linear_cfg = OmegaConf.load("eval_linear.yaml")
+    # copy dist parameters
+    eval_linear_cfg.dataset = "Flowers102"
+    eval_linear_cfg.gpu = cfg.gpu
+    eval_linear_cfg.rank = cfg.rank
+    eval_linear_cfg.world_size = cfg.world_size
+    eval_linear_cfg.dist_url = cfg.dist_url
+    eval_linear.main(eval_linear_cfg)
+
+    print('STARTING LINEAR EVAL EVALUATION FLOWERS')
+    eval_linear_cfg = OmegaConf.load("eval_linear.yaml")
+    # copy dist parameters
+    eval_linear_cfg.dataset = "StanfordCars"
+    eval_linear_cfg.gpu = cfg.gpu
+    eval_linear_cfg.rank = cfg.rank
+    eval_linear_cfg.world_size = cfg.world_size
+    eval_linear_cfg.dist_url = cfg.dist_url
+    eval_linear.main(eval_linear_cfg)

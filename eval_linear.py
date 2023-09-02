@@ -130,8 +130,11 @@ def main(cfg):
 
     # Optionally resume from a checkpoint
     to_restore = {"epoch": 0, "best_acc": 0.}
+
+    checkpoint_name = "checkpoint.pth.tar" if cfg.dataset == "ImageNet" else f"checkpoint_{cfg.dataset}.pth.tar"
+
     utils.restart_from_checkpoint(
-        os.path.join(cfg.output_dir, "checkpoint.pth.tar"),
+        os.path.join(cfg.output_dir, checkpoint_name),
         run_variables=to_restore,
         linear_classifier=linear_classifier,
         optimizer=optimizer,
@@ -172,7 +175,7 @@ def main(cfg):
                 "optimizer": optimizer.state_dict(),
                 "best_acc": best_acc,
             }
-            path = os.path.join(cfg.output_dir, "checkpoint.pth.tar")
+            path = os.path.join(cfg.output_dir, checkpoint_name)
             torch.save(save_dict, path)
 
     print("Training of the supervised linear classifier on frozen features completed.\n"
