@@ -28,7 +28,8 @@ if __name__ == "__main__":
     eval_linear_cfg = OmegaConf.load("eval_linear.yaml")
     # copy dist parameters
     eval_linear_cfg.dataset = "Flowers102"
-    eval_linear_cfg.data_path = "."
+    eval_linear_cfg.batch_size = eval_linear_cfg.batch_size//2
+    eval_linear_cfg.data_path = "../"
     eval_linear_cfg.gpu = cfg.gpu
     eval_linear_cfg.rank = cfg.rank
     eval_linear_cfg.world_size = cfg.world_size
@@ -39,7 +40,8 @@ if __name__ == "__main__":
     eval_linear_cfg = OmegaConf.load("eval_linear.yaml")
     # copy dist parameters
     eval_linear_cfg.dataset = "StanfordCars"
-    eval_linear_cfg.data_path = "."
+    eval_linear_cfg.batch_size = eval_linear_cfg.batch_size // 2
+    eval_linear_cfg.data_path = "../"
     eval_linear_cfg.gpu = cfg.gpu
     eval_linear_cfg.rank = cfg.rank
     eval_linear_cfg.world_size = cfg.world_size
