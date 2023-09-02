@@ -118,7 +118,7 @@ def make_dataset(
         split = "train" if train else "test"
         return StanfordCars(root, download=True, split=split, transform=transform), 196
     elif dataset == "inat18":
-        return INaturalist(root, download=True, version="2018", transform=transform), 8142
+        return INaturalist(root, download=False, version="2018", transform=transform), 8142
     elif dataset == 'ImageNet':
         root = os.path.join(root, 'train' if train else 'val')
         dataset = ImageFolder(root, transform=transform)
