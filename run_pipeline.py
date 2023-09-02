@@ -28,7 +28,7 @@ if __name__ == "__main__":
     eval_linear_cfg = OmegaConf.load("eval_linear.yaml")
     # copy dist parameters
     eval_linear_cfg.dataset = "inat18"
-    eval_linear_cfg.data_path = "../"
+    eval_linear_cfg.data_path = "../datasets"
     eval_linear.main(eval_linear_cfg)
 
     print('STARTING LINEAR EVAL EVALUATION Flowers102')
@@ -37,7 +37,7 @@ if __name__ == "__main__":
     eval_linear_cfg.dataset = "Flowers102"
 
     eval_linear_cfg.batch_size = eval_linear_cfg.batch_size//2
-    eval_linear_cfg.data_path = "../"
+    eval_linear_cfg.data_path = "../datasets"
     eval_linear.main(eval_linear_cfg)
 
     print('STARTING LINEAR EVAL EVALUATION StanfordCars')
@@ -45,5 +45,5 @@ if __name__ == "__main__":
     # copy dist parameters
     eval_linear_cfg.dataset = "StanfordCars"
     eval_linear_cfg.batch_size = eval_linear_cfg.batch_size // 2
-    eval_linear_cfg.data_path = "../"
+    eval_linear_cfg.data_path = "../datasets"
     eval_linear.main(eval_linear_cfg)
