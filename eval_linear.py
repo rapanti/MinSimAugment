@@ -40,7 +40,7 @@ def main(cfg):
         std=std,
     )
 
-    cfg.data_path = cfg.data_path + "inat18/val" if cfg.dataset == "inat18" else cfg.data_path
+    cfg.data_path = cfg.data_path + "/inat18/val" if cfg.dataset == "inat18" else cfg.data_path
 
     val_data, cfg.num_labels = data.make_dataset(cfg.data_path, cfg.dataset, False, val_transform)
 
@@ -60,7 +60,7 @@ def main(cfg):
         std=std,
     )
 
-    cfg.data_path = cfg.data_path.rstrip("/val") + "inat18/train" if cfg.dataset == "inat18" else cfg.data_path
+    cfg.data_path = cfg.data_path.rstrip("/val") + "/inat18/train" if cfg.dataset == "inat18" else cfg.data_path
 
     train_data, _ = data.make_dataset(cfg.data_path, cfg.dataset, True, train_transform)
 
