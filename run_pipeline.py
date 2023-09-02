@@ -30,7 +30,7 @@ if __name__ == "__main__":
     eval_linear_cfg.weight_decay = 0.05
     eval_linear_cfg.lr = 1e-6
     eval_linear_cfg.epochs = 1000
-    eval_linear_cfg.optimizer = "AdamW"
+    eval_linear_cfg.optimizer = "adamw"
     eval_linear_cfg.data_path = "../datasets"
     eval_linear.main(eval_linear_cfg)
 
@@ -40,7 +40,7 @@ if __name__ == "__main__":
     eval_linear_cfg.weight_decay = 0.05
     eval_linear_cfg.lr = 1e-6
     eval_linear_cfg.epochs = 1000
-    eval_linear_cfg.optimizer = "AdamW"
+    eval_linear_cfg.optimizer = "adamw"
     eval_linear_cfg.data_path = "../datasets"
     eval_linear.main(eval_linear_cfg)
 
@@ -50,7 +50,7 @@ if __name__ == "__main__":
     eval_linear_cfg.weight_decay = 0.05
     eval_linear_cfg.lr = 1e-6
     eval_linear_cfg.epochs = 1000
-    eval_linear_cfg.optimizer = "AdamW"
+    eval_linear_cfg.optimizer = "adamw"
     eval_linear_cfg.data_path = "../datasets"
     eval_linear.main(eval_linear_cfg)
 
@@ -59,7 +59,7 @@ if __name__ == "__main__":
     eval_linear_cfg.weight_decay = 0.05
     eval_linear_cfg.lr = 5e-5
     eval_linear_cfg.epochs = 100
-    eval_linear_cfg.optimizer = "AdamW"
+    eval_linear_cfg.optimizer = "adamw"
     eval_linear_cfg.data_path = "../datasets"
     eval_linear.main(eval_linear_cfg)
 
