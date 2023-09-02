@@ -27,7 +27,8 @@ if __name__ == "__main__":
     print('*************STARTING LINEAR EVAL EVALUATION: CIFAR10*************')
     eval_linear_cfg.dataset = "CIFAR10"
     eval_linear_cfg.batch_size = 512
-    # eval_linear_cfg.weight_decay = 0.05
+    eval_linear_cfg.lr = 0.02
+    eval_linear_cfg.weight_decay = 0.05
     # eval_linear_cfg.lr = 1e-6
     # eval_linear_cfg.epochs = 300
     # eval_linear_cfg.optimizer = "adamw"
