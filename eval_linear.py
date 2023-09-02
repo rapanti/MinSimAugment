@@ -32,12 +32,16 @@ def main(cfg):
         mean, std = data.CIFAR10_DEFAULT_MEAN, data.CIFAR10_DEFAULT_STD
     else:
         mean, std = data.IMAGENET_DEFAULT_MEAN, data.IMAGENET_DEFAULT_STD
+
     val_transform = data.make_classification_val_transform(
         resize_size=cfg.resize_size,
         crop_size=cfg.crop_size,
         mean=mean,
         std=std,
     )
+
+    cfg.data_path = cfg.data_path + "inat18/val" if cfg.dataset == "inat18" else cfg.data_path
+
     val_data, cfg.num_labels = data.make_dataset(cfg.data_path, cfg.dataset, False, val_transform)
 
     sampler = torch.utils.data.SequentialSampler(val_data)
@@ -55,6 +59,9 @@ def main(cfg):
         mean=mean,
         std=std,
     )
+
+    cfg.data_path = cfg.data_path.rstrip("/val") + "inat18/train" if cfg.dataset == "inat18" else cfg.data_path
+
     train_data, _ = data.make_dataset(cfg.data_path, cfg.dataset, True, train_transform)
 
     batch_size_per_gpu = cfg.batch_size // dist.get_world_size()

@@ -22,6 +22,11 @@ if __name__ == "__main__":
     eval_cfg.rank = cfg.rank
     eval_cfg.world_size = cfg.world_size
 
+    # Test iNaturalist
+    eval_cfg.dataset = "inat18"
+    eval_cfg.data_path = "../"
+
+
     print('STARTING EVALUATION')
     eval_linear.main(eval_cfg)
 
