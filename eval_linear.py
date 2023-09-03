@@ -44,11 +44,13 @@ def main(cfg):
 
     val_data, cfg.num_labels = data.make_dataset(cfg.data_path, cfg.dataset, False, val_transform)
 
+    batch_size_per_gpu = cfg.batch_size // dist.get_world_size()
+
     sampler = torch.utils.data.SequentialSampler(val_data)
     val_loader = torch.utils.data.DataLoader(
         val_data,
         sampler=sampler,
-        batch_size=cfg.batch_size,
+        batch_size=batch_size_per_gpu,
         num_workers=cfg.num_workers,
         pin_memory=True,
         drop_last=False
@@ -64,7 +66,6 @@ def main(cfg):
 
     train_data, _ = data.make_dataset(cfg.data_path, cfg.dataset, True, train_transform)
 
-    batch_size_per_gpu = cfg.batch_size // dist.get_world_size()
     sampler = torch.utils.data.distributed.DistributedSampler(train_data)
     train_loader = torch.utils.data.DataLoader(
         train_data,

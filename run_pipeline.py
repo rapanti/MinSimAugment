@@ -38,8 +38,8 @@ if __name__ == "__main__":
     eval_linear_cfg.dataset = "CIFAR10"
     eval_linear_cfg.batch_size = 512
     eval_linear_cfg.finetune = True
-    eval_linear_cfg.lr = 0.001
-    eval_linear_cfg.weight_decay = 0.0005
+    eval_linear_cfg.lr = 7.5e-6
+    eval_linear_cfg.weight_decay = 0.05
     eval_linear_cfg.optimizer = "adamw"
     eval_linear_cfg.epochs = 300
     eval_linear_cfg.data_path = "../datasets"
@@ -49,8 +49,8 @@ if __name__ == "__main__":
     eval_linear_cfg.dataset = "CIFAR100"
     eval_linear_cfg.batch_size = 512
     eval_linear_cfg.finetune = True
-    eval_linear_cfg.lr = 0.001
-    eval_linear_cfg.weight_decay = 0.0005
+    eval_linear_cfg.lr = 5e-6
+    eval_linear_cfg.weight_decay = 0.05
     eval_linear_cfg.optimizer = "adamw"
     eval_linear_cfg.epochs = 300
     eval_linear_cfg.data_path = "../datasets"
@@ -60,8 +60,8 @@ if __name__ == "__main__":
     eval_linear_cfg.dataset = "Flowers102"
     eval_linear_cfg.batch_size = 512
     eval_linear_cfg.finetune = True
-    eval_linear_cfg.lr = 0.001
-    eval_linear_cfg.weight_decay = 0.0005
+    eval_linear_cfg.lr = 1e-6
+    eval_linear_cfg.weight_decay = 0.05
     eval_linear_cfg.optimizer = "adamw"
     eval_linear_cfg.epochs = 300
     eval_linear_cfg.data_path = "../datasets"
@@ -70,9 +70,10 @@ if __name__ == "__main__":
     # print('*************STARTING LINEAR EVAL EVALUATION: iNaturalist*************')
     # eval_linear_cfg.dataset = "inat18"
     # eval_linear_cfg.batch_size = 512
-    # eval_linear_cfg.lr = 0.001
-    # # eval_linear_cfg.weight_decay = 0.0005
-    # eval_linear_cfg.epochs = 100
+    # eval_linear_cfg.lr = 5e-5
+    # # eval_linear_cfg.weight_decay = 0.05
+    # eval_linear_cfg.epochs = 300
+    # eval_linear_cfg.optimizer = "adamw"
     # eval_linear_cfg.data_path = "../datasets"
     # eval_linear.main(eval_linear_cfg)
 
