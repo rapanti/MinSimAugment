@@ -115,6 +115,10 @@ def main(cfg):
     # init the fc layer
     linear_classifier = LinearClassifier(embed_dim, num_labels=cfg.num_labels)
     linear_classifier = linear_classifier.cuda()
+
+    # load weights to evaluate
+    utils.load_pretrained_weights(linear_classifier, cfg.pretrained, None)
+
     linear_classifier = nn.parallel.DistributedDataParallel(linear_classifier, device_ids=[cfg.gpu])
 
     # define loss function (criterion) and optimizer
@@ -186,6 +190,7 @@ def main(cfg):
                 "epoch": epoch + 1,
                 "model": model.state_dict(),
                 "optimizer": optimizer.state_dict(),
+                "linear_classifier": linear_classifier.state_dict(),
                 "best_acc": best_acc,
             }
             path = os.path.join(cfg.output_dir, checkpoint_name)
