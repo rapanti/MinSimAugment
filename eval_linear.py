@@ -40,7 +40,7 @@ def main(cfg):
         std=std,
     )
 
-    cfg.data_path = cfg.data_path + "/inat18/val" if cfg.dataset == "inat18" else cfg.data_path
+    # cfg.data_path = cfg.data_path + "/inat18/val" if cfg.dataset == "inat18" else cfg.data_path
 
     val_data, cfg.num_labels = data.make_dataset(cfg.data_path, cfg.dataset, False, val_transform)
 
@@ -60,7 +60,7 @@ def main(cfg):
         std=std,
     )
 
-    cfg.data_path = cfg.data_path.rstrip("/val") + "/inat18/train" if cfg.dataset == "inat18" else cfg.data_path
+    # cfg.data_path = cfg.data_path.rstrip("/val") + "/inat18/train" if cfg.dataset == "inat18" else cfg.data_path
 
     train_data, _ = data.make_dataset(cfg.data_path, cfg.dataset, True, train_transform)
 
@@ -99,12 +99,18 @@ def main(cfg):
     model.cuda()
     model.eval()
 
-    for p in model.parameters():
-        p.requires_grad = False
-
     # load weights to evaluate
     utils.load_pretrained_weights(model, cfg.pretrained, cfg.ckp_key)
     print(f"Model {cfg.arch} built.")
+
+    if cfg.finetune:
+        for p in model.parameters():
+            p.requires_grad = True
+        model = nn.parallel.DistributedDataParallel(model, device_ids=[cfg.gpu])
+
+    else:
+        for p in model.parameters():
+            p.requires_grad = False
 
     # init the fc layer
     linear_classifier = LinearClassifier(embed_dim, num_labels=cfg.num_labels)
@@ -202,15 +208,18 @@ def train(loader, model, linear_classifier, criterion, optimizer, epoch, cfg, bo
         targets = targets.cuda(non_blocking=True)
 
         # compute output
-        with torch.no_grad():
-            if "vit" in cfg.arch:
-                intermediate_output = model.get_intermediate_layers(images, cfg.n_last_blocks)
-                output = torch.cat([x[:, 0] for x in intermediate_output], dim=-1)
-                if cfg.avgpool:
-                    output = torch.cat((output.unsqueeze(-1), torch.mean(intermediate_output[-1][:, 1:], dim=1).unsqueeze(-1)), dim=-1)
-                    output = output.reshape(output.shape[0], -1)
-            else:
-                output = model(images)
+        if cfg.finetune:
+            output = model(images)
+        else:
+            with torch.no_grad():
+                if "vit" in cfg.arch:
+                    intermediate_output = model.get_intermediate_layers(images, cfg.n_last_blocks)
+                    output = torch.cat([x[:, 0] for x in intermediate_output], dim=-1)
+                    if cfg.avgpool:
+                        output = torch.cat((output.unsqueeze(-1), torch.mean(intermediate_output[-1][:, 1:], dim=1).unsqueeze(-1)), dim=-1)
+                        output = output.reshape(output.shape[0], -1)
+                else:
+                    output = model(images)
 
         output = linear_classifier(output)
         loss = criterion(output, targets)
@@ -252,15 +261,18 @@ def validate(loader, model, linear_classifier, criterion, cfg):
             images = images.cuda(non_blocking=True)
             target = target.cuda(non_blocking=True)
 
-            with torch.no_grad():
-                if "vit" in cfg.arch:
-                    intermediate_output = model.get_intermediate_layers(images, cfg.n_last_blocks)
-                    output = torch.cat([x[:, 0] for x in intermediate_output], dim=-1)
-                    if cfg.avgpool:
-                        output = torch.cat((output.unsqueeze(-1), torch.mean(intermediate_output[-1][:, 1:], dim=1).unsqueeze(-1)), dim=-1)
-                        output = output.reshape(output.shape[0], -1)
-                else:
-                    output = model(images)
+            if cfg.finetune:
+                output = model(images)
+            else:
+                with torch.no_grad():
+                    if "vit" in cfg.arch:
+                        intermediate_output = model.get_intermediate_layers(images, cfg.n_last_blocks)
+                        output = torch.cat([x[:, 0] for x in intermediate_output], dim=-1)
+                        if cfg.avgpool:
+                            output = torch.cat((output.unsqueeze(-1), torch.mean(intermediate_output[-1][:, 1:], dim=1).unsqueeze(-1)), dim=-1)
+                            output = output.reshape(output.shape[0], -1)
+                    else:
+                        output = model(images)
 
             output = linear_classifier(output)
             loss = criterion(output, target)
@@ -324,6 +336,8 @@ def get_args_parser():
                    help="Optimizer (default: sqd)")
     p.add_argument('--wd', '--weight_decay', type=float, dest='weight_decay',
                    help='weight decay (default: 0.)')
+    p.add_argument('--finetune', type=utils.bool_flag,
+                   help="")
 
     # augmentation parameters
     p.add_argument('--crop_size', type=int,
