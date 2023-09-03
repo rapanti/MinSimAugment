@@ -115,10 +115,6 @@ def main(cfg):
     # init the fc layer
     linear_classifier = LinearClassifier(embed_dim, num_labels=cfg.num_labels)
     linear_classifier = linear_classifier.cuda()
-
-    # load weights to evaluate
-    utils.load_pretrained_weights(linear_classifier, cfg.pretrained, None)
-
     linear_classifier = nn.parallel.DistributedDataParallel(linear_classifier, device_ids=[cfg.gpu])
 
     # define loss function (criterion) and optimizer
@@ -150,12 +146,23 @@ def main(cfg):
 
     checkpoint_name = "checkpoint.pth.tar" if cfg.dataset == "ImageNet" else f"checkpoint_{cfg.dataset}.pth.tar"
 
-    utils.restart_from_checkpoint(
-        os.path.join(cfg.output_dir, checkpoint_name),
-        run_variables=to_restore,
-        linear_classifier=linear_classifier,
-        optimizer=optimizer,
-    )
+    if cfg.finetune:
+        # load classifier and backbone
+        utils.restart_from_checkpoint(
+            os.path.join(cfg.output_dir, checkpoint_name),
+            run_variables=to_restore,
+            model=model,
+            linear_classifier=linear_classifier,
+            optimizer=optimizer,
+        )
+    else:
+        # only classifier needs to be loaded
+        utils.restart_from_checkpoint(
+            os.path.join(cfg.output_dir, checkpoint_name),
+            run_variables=to_restore,
+            linear_classifier=linear_classifier,
+            optimizer=optimizer,
+        )
     start_epoch = to_restore["epoch"]
     best_acc = to_restore["best_acc"]
 
