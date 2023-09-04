@@ -157,4 +157,4 @@ cython_debug/
 
 # Misc
 exp/
-cluster
+area51.py
