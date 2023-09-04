@@ -24,6 +24,16 @@ if __name__ == "__main__":
     eval_linear_cfg.dist_url = cfg.dist_url
     eval_linear.main(eval_linear_cfg)
 
+    print('*************STARTING LINEAR EVAL EVALUATION: iNaturalist*************')
+    eval_linear_cfg.dataset = "inat21"
+    eval_linear_cfg.batch_size = 512
+    eval_linear_cfg.lr = 5e-5
+    eval_linear_cfg.weight_decay = 0.05
+    eval_linear_cfg.epochs = 100
+    eval_linear_cfg.optimizer = "adamw"
+    eval_linear_cfg.data_path = "../datasets"
+    eval_linear.main(eval_linear_cfg)
+
     print('STARTING kNN EVALUATION')
     eval_knn_cfg = OmegaConf.load("eval_knn.yaml")
     # copy dist parameters
@@ -67,15 +77,7 @@ if __name__ == "__main__":
     eval_linear_cfg.data_path = "../datasets"
     eval_linear.main(eval_linear_cfg)
 
-    # print('*************STARTING LINEAR EVAL EVALUATION: iNaturalist*************')
-    # eval_linear_cfg.dataset = "inat18"
-    # eval_linear_cfg.batch_size = 512
-    # eval_linear_cfg.lr = 5e-5
-    # # eval_linear_cfg.weight_decay = 0.05
-    # eval_linear_cfg.epochs = 300
-    # eval_linear_cfg.optimizer = "adamw"
-    # eval_linear_cfg.data_path = "../datasets"
-    # eval_linear.main(eval_linear_cfg)
+
 
     # TODO: source currently offline
     # print('*************STARTING LINEAR EVAL EVALUATION: StanfordCars*************')
