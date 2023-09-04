@@ -98,25 +98,30 @@ def main(cfg):
         print(f"Unknown architecture: {cfg.arch}")
         sys.exit(1)
     model.cuda()
-    model.eval()
+
 
     # load weights to evaluate
     utils.load_pretrained_weights(model, cfg.pretrained, cfg.ckp_key)
     print(f"Model {cfg.arch} built.")
 
-    if cfg.finetune:
-        for p in model.parameters():
-            p.requires_grad = True
-        model = nn.parallel.DistributedDataParallel(model, device_ids=[cfg.gpu])
-
-    else:
-        for p in model.parameters():
-            p.requires_grad = False
-
     # init the fc layer
     linear_classifier = LinearClassifier(embed_dim, num_labels=cfg.num_labels)
     linear_classifier = linear_classifier.cuda()
     linear_classifier = nn.parallel.DistributedDataParallel(linear_classifier, device_ids=[cfg.gpu])
+
+    if cfg.finetune:
+        for p in model.parameters():
+            p.requires_grad = True
+        model = nn.parallel.DistributedDataParallel(model, device_ids=[cfg.gpu])
+        model.train()
+        params_to_optimize = list(model.parameters()) + list(linear_classifier.parameters())
+    else:
+        for p in model.parameters():
+            p.requires_grad = False
+        model.eval()
+        params_to_optimize = linear_classifier.parameters()
+
+
 
     # define loss function (criterion) and optimizer
     criterion = nn.CrossEntropyLoss().cuda()
@@ -124,15 +129,15 @@ def main(cfg):
     # infer learning rate
     init_lr = cfg.lr * cfg.batch_size / 256
     if cfg.optimizer == "lars":
-        optimizer = optimizers.LARS(linear_classifier.parameters(), init_lr,
+        optimizer = optimizers.LARS(params_to_optimize, init_lr,
                                     momentum=cfg.momentum,
                                     weight_decay=cfg.weight_decay)
     elif cfg.optimizer == "sgd":
-        optimizer = torch.optim.SGD(linear_classifier.parameters(), init_lr,
+        optimizer = torch.optim.SGD(params_to_optimize, init_lr,
                                     momentum=cfg.momentum,
                                     weight_decay=cfg.weight_decay)
     elif cfg.optimizer == "adamw":
-        optimizer = torch.optim.AdamW(linear_classifier.parameters(), init_lr,
+        optimizer = torch.optim.AdamW(params_to_optimize, init_lr,
                                       weight_decay=cfg.weight_decay)
     else:
         raise ValueError(f"Unknown optimizer: {cfg.optimizer}")
