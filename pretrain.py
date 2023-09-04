@@ -224,7 +224,7 @@ def main(cfg):
             'optimizer': optimizer.state_dict(),
             'epoch': epoch + 1,
             'dino_loss': dino_loss.state_dict(),
-            "fp16": fp16.state_dict() if fp16 is not None else None,
+            "fp16_scaler": fp16.state_dict() if fp16 is not None else None,
             "total_time": total_time,
         }
         utils.save_on_master(save_dict, os.path.join(cfg.output_dir, 'checkpoint.pth'))
