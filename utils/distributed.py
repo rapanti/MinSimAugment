@@ -3,7 +3,7 @@ import sys
 
 import torch
 import torch.distributed as dist
-
+import datetime
 
 def init_distributed_mode(args):
     # launched with torch.distributed.launch
@@ -31,6 +31,7 @@ def init_distributed_mode(args):
         init_method=args.dist_url,
         world_size=args.world_size,
         rank=args.rank,
+        **args,
     )
 
     torch.cuda.set_device(args.gpu)

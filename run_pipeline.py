@@ -3,6 +3,7 @@ from omegaconf import OmegaConf
 import eval_linear, eval_knn
 import pretrain
 import utils
+import datetime
 
 if __name__ == "__main__":
     # load pretrain config
@@ -57,7 +58,7 @@ if __name__ == "__main__":
     eval_linear_cfg.data_path = "../datasets"
     eval_linear.main(eval_linear_cfg)
 
-    print('*************STARTING LINEAR EVAL EVALUATION: iNaturalist*************')
+    print('*************STARTING LINEAR EVAL EVALUATION: iNaturalist (using train_mini)*************')
     eval_linear_cfg.dataset = "inat21"
     eval_linear_cfg.batch_size = 512
     eval_linear_cfg.lr = 5e-5
@@ -68,12 +69,18 @@ if __name__ == "__main__":
     eval_linear.main(eval_linear_cfg)
 
     print('STARTING kNN EVALUATION')
+    # knn code currently times out when using multiple GPUs and when using cuda -> increase timeout interval to 10h
+    # make sure to run knn eval last
+    import torch.distributed as dist
+    dist.destroy_process_group()
+
     eval_knn_cfg = OmegaConf.load("eval_knn.yaml")
     # copy dist parameters
     eval_knn_cfg.gpu = cfg.gpu
     eval_knn_cfg.rank = cfg.rank
     eval_knn_cfg.world_size = cfg.world_size
     eval_knn_cfg.dist_url = cfg.dist_url
+    eval_knn_cfg.timeout = datetime.timedelta(seconds=1800*20)
 
     eval_knn.main(eval_knn_cfg)
 
