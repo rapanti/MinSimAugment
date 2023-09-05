@@ -3,17 +3,10 @@ import os
 import numpy as np
 import pandas as pd
 
-from analysis.plot_utils import read_file
+from utils import extract_list, read_file
 
 
-def extract_list(params):
-    out = []
-    for x in params:
-        if isinstance(x, (list, tuple)):
-            out.extend(extract_list(x))
-        else:
-            out.append(x)
-    return out
+
 
 
 def extract_params(raw):
@@ -74,16 +67,16 @@ def json_to_pandas(json_file):
 
 
 if __name__ == '__main__':
-    w_dir = "../../../metrics-data"
-    data = read_file(os.path.join(w_dir, "simsiam-minsim-collect_metrics-resnet50-ImageNet-ep100-bs256-select_cross-ncrops4-lr0.05-wd0.0001-mom0.9-seed2-metrics.json"))
+    path = ...
+    data = read_file(path)
 
     X_array, Y_array = json_to_pandas(data)
-
-    print(X_array.shape)
-    print(Y_array.shape)
 
     df_X = pd.DataFrame(X_array)
     df_Y = pd.DataFrame(Y_array)
 
-    df_X.to_csv(os.path.join(w_dir, "X-simsiam-minsim-seed2.csv"), index=False)
-    df_Y.to_csv(os.path.join(w_dir, "Y-simsiam-minsim-seed2.csv"), index=False)
+    head, tail = os.path.split(path)
+    x_out_path = os.path.join(tail, "X-" + tail.replace(".json", ".csv"))
+    y_out_path = os.path.join(tail, "Y-" + tail.replace(".json", ".csv"))
+    df_X.to_csv(x_out_path, index=False)
+    df_Y.to_csv(y_out_path, index=False)

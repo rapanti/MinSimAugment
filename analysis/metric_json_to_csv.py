@@ -4,7 +4,7 @@ import math
 import numpy as np
 
 from plot_relative_dist import calc_rel_dist
-from plot_utils import read_file, calc_iou
+from utils import read_file, calc_iou
 
 
 def calc_clr_dist(x1, x2):

@@ -116,3 +116,13 @@ def calc_iou(x1, x2):
     B = calc_area(x2)
     i = calc_overlap(x1, x2)
     return i / (A + B - i)
+
+
+def extract_list(params):
+    out = []
+    for x in params:
+        if isinstance(x, (list, tuple)):
+            out.extend(extract_list(x))
+        else:
+            out.append(x)
+    return out
