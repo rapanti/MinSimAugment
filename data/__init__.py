@@ -12,6 +12,8 @@ IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
 CIFAR10_DEFAULT_MEAN = (0.4914, 0.4822, 0.4465)
 CIFAR10_DEFAULT_STD = (0.2023, 0.1994, 0.2010)
 
+FLOWERS102_DEFAULT_MEAN = (0.4353, 0.3773, 0.2872)
+FLOWERS102_DEFAULT_STD = (0.2966, 0.2455, 0.2698)
 
 class MultiCropsTransform:
     """Take multiple random crops of one image as the query and key."""
@@ -119,7 +121,7 @@ def make_dataset(
         return StanfordCars(root, download=True, split=split, transform=transform), 196
     elif dataset == "inat21":
         version = "2021_train_mini" if train else "2021_valid"
-        return INaturalist(root, download=True, version=version, transform=transform), 10000
+        return INaturalist(root, download=False, version=version, transform=transform), 10000
     elif dataset == 'ImageNet':
         root = os.path.join(root, 'train' if train else 'val')
         dataset = ImageFolder(root, transform=transform)

@@ -30,6 +30,8 @@ def main(cfg):
     # prepare data
     if cfg.dataset == "CIFAR10":
         mean, std = data.CIFAR10_DEFAULT_MEAN, data.CIFAR10_DEFAULT_STD
+    elif cfg.dataset == "Flowers102":
+        mean, std = data.FLOWERS102_DEFAULT_MEAN, data.FLOWERS102_DEFAULT_STD
     else:
         mean, std = data.IMAGENET_DEFAULT_MEAN, data.IMAGENET_DEFAULT_STD
 
@@ -39,8 +41,6 @@ def main(cfg):
         mean=mean,
         std=std,
     )
-
-    # cfg.data_path = cfg.data_path + "/inat18/val" if cfg.dataset == "inat18" else cfg.data_path
 
     val_data, cfg.num_labels = data.make_dataset(cfg.data_path, cfg.dataset, False, val_transform)
 
@@ -61,8 +61,6 @@ def main(cfg):
         mean=mean,
         std=std,
     )
-
-    # cfg.data_path = cfg.data_path.rstrip("/val") + "/inat18/train" if cfg.dataset == "inat18" else cfg.data_path
 
     train_data, _ = data.make_dataset(cfg.data_path, cfg.dataset, True, train_transform)
 
