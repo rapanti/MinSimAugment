@@ -285,8 +285,9 @@ def load_pretrained_weights(model, pretrained_weights, checkpoint_key):
             del state_dict[k]
 
         msg = model.load_state_dict(state_dict, strict=False)
-        if not isinstance(model, VisionTransformer):
-            assert set(msg.missing_keys) == {"fc.weight", "fc.bias"}
+        # commented out due to taking linear_eval from DINO (which uses linear classifier class
+        #if not isinstance(model, VisionTransformer):
+        #    assert set(msg.missing_keys) == {"fc.weight", "fc.bias"}
         print('Pretrained weights found at {} and loaded with msg: {}'.format(pretrained_weights, msg))
     else:
         print("=> no checkpoint found at '{}'".format(pretrained_weights))
