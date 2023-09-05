@@ -68,15 +68,27 @@ def get_iou_data(params, selected):
 if __name__ == "__main__":
     path = "C:/Users/ovi/Documents/SelfSupervisedLearning/metrics/pickle/simsiam-minsim-resnet50-ep100-seed0.pkl"
     metrics = pd.read_pickle(path)
+    data0 = get_iou_data(metrics["params"], metrics["selected"])
 
-    data = get_iou_data(metrics["params"], metrics["selected"])
-    std = [None, None]
+    path = "C:/Users/ovi/Documents/SelfSupervisedLearning/metrics/pickle/simsiam-minsim-resnet50-ep100-seed1.pkl"
+    metrics = pd.read_pickle(path)
+    data1 = get_iou_data(metrics["params"], metrics["selected"])
 
-    file_name = "iou.png"
-    title = "Average IoU of selected/not-selected pairs"
+    path = "C:/Users/ovi/Documents/SelfSupervisedLearning/metrics/pickle/simsiam-minsim-resnet50-ep100-seed2.pkl"
+    metrics = pd.read_pickle(path)
+    data2 = get_iou_data(metrics["params"], metrics["selected"])
+
+    select = np.stack((data0[0], data1[0], data2[0]))
+    not_select = np.stack((data0[1], data1[1], data2[1]))
+
+    data = [select.mean(axis=0), not_select.mean(axis=0)]
+    std = [select.std(axis=0), not_select.std(axis=0)]
+
+    # file_name = "iou.png"
+    title = "Average IoU of selected vs not-selected-pairs"
     labels = ["selected", "not-selected"]
     exp_name = ""
-    xlabel = "epoch"
+    xlabel = "Epoch"
     ylabel = "IoU"
 
     fig, ax = plt.subplots()
@@ -86,8 +98,9 @@ if __name__ == "__main__":
         if sig is not None:
             ax.fill_between(x, y + sig, y - sig, facecolor=color, alpha=0.25)
     ax.grid()
-    ax.legend(bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.0)
-    ax.set_title(file_name)
+    ax.legend(loc='center right')
+    # ax.legend(bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.0)
+    # ax.set_title(file_name)
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
     fig.suptitle(title)
@@ -98,6 +111,5 @@ if __name__ == "__main__":
     # out_dir.mkdir(parents=True, exist_ok=True)
     # save_path = out_dir.joinpath(file_name)
     plt.show()
-    fig.savefig(save_path)
-    print(f"Plot saved at {save_path}")
+    fig.savefig("pic.png")
     plt.close(fig)
