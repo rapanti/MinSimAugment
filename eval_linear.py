@@ -214,6 +214,10 @@ def main(cfg):
 def train(loader, model, linear_classifier, criterion, optimizer, epoch, cfg, board):
     # switch to train mode
     linear_classifier.train()
+    if cfg.finetune:
+        model.train()
+    else:
+        model.eval()
 
     metric_logger = utils.MetricLogger(delimiter=" ")
     header = 'Epoch: [{}/{}]'.format(epoch, cfg.epochs)
@@ -269,6 +273,7 @@ def train(loader, model, linear_classifier, criterion, optimizer, epoch, cfg, bo
 def validate(loader, model, linear_classifier, criterion, cfg):
     # switch to evaluate mode
     linear_classifier.eval()
+    model.eval()
 
     metric_logger = utils.MetricLogger(delimiter=" ")
     header = 'Test:'
