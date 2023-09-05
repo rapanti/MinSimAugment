@@ -256,7 +256,7 @@ def train(loader, model, linear_classifier, criterion, optimizer, epoch, cfg, bo
         metric_logger.update(acc1=acc1[0])
         metric_logger.update(acc5=acc5[0])
 
-        if dist.is_main_process() and it % cfg.log_freq:
+        if dist.is_main_process() and it % cfg.logger_freq:
             board.add_scalar(tag="eval acc1", scalar_value=acc1, global_step=it)
             board.add_scalar(tag="eval loss", scalar_value=loss.item(), global_step=it)
             board.add_scalar(tag="eval lr", scalar_value=optimizer.param_groups[0]["lr"], global_step=it)
