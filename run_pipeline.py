@@ -24,16 +24,6 @@ if __name__ == "__main__":
     eval_linear_cfg.dist_url = cfg.dist_url
     eval_linear.main(eval_linear_cfg)
 
-    print('STARTING kNN EVALUATION')
-    eval_knn_cfg = OmegaConf.load("eval_knn.yaml")
-    # copy dist parameters
-    eval_knn_cfg.gpu = cfg.gpu
-    eval_knn_cfg.rank = cfg.rank
-    eval_knn_cfg.world_size = cfg.world_size
-    eval_knn_cfg.dist_url = cfg.dist_url
-
-    eval_knn.main(eval_knn_cfg)
-
     print('*************STARTING FINETUNING: CIFAR10*************')
     eval_linear_cfg.dataset = "CIFAR10"
     eval_linear_cfg.batch_size = 512
@@ -76,6 +66,16 @@ if __name__ == "__main__":
     eval_linear_cfg.optimizer = "adamw"
     eval_linear_cfg.data_path = "/work/dlclarge1/ferreira-simsiam/minsim_experiments/datasets"
     eval_linear.main(eval_linear_cfg)
+
+    print('STARTING kNN EVALUATION')
+    eval_knn_cfg = OmegaConf.load("eval_knn.yaml")
+    # copy dist parameters
+    eval_knn_cfg.gpu = cfg.gpu
+    eval_knn_cfg.rank = cfg.rank
+    eval_knn_cfg.world_size = cfg.world_size
+    eval_knn_cfg.dist_url = cfg.dist_url
+
+    eval_knn.main(eval_knn_cfg)
 
     # TODO: source currently offline
     # print('*************STARTING LINEAR EVAL EVALUATION: StanfordCars*************')
