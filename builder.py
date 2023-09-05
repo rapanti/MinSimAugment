@@ -19,31 +19,26 @@ class SimSiam(nn.Module):
         self.encoder = base_encoder(**encoder_params)
 
         # build an n-layer projector
-        input_dim = self.encoder.fc.weight.shape[1]
-
-        if isinstance(self.encoder, VisionTransformer):
-            hidden_dim = 2048
-        else:
-            hidden_dim = input_dim
+        prev_dim = self.encoder.fc.weight.shape[1]
 
         layers = [
-            nn.Linear(input_dim, hidden_dim, bias=False),
-            nn.BatchNorm1d(hidden_dim),
+            nn.Linear(prev_dim, prev_dim, bias=False),
+            nn.BatchNorm1d(prev_dim),
             nn.ReLU(inplace=True),
         ]
+
         for _ in range(proj_layer - 2):
             layers.extend([
-                nn.Linear(hidden_dim, hidden_dim, bias=False),
-                nn.BatchNorm1d(hidden_dim),
+                nn.Linear(prev_dim, prev_dim, bias=False),
+                nn.BatchNorm1d(prev_dim),
                 nn.ReLU(inplace=True),
             ])
         layers.extend([
-            # self.encoder.fc,
-            nn.Linear(hidden_dim, dim, bias=False),
+            self.encoder.fc,
             nn.BatchNorm1d(dim, affine=False)
         ])
         self.encoder.fc = nn.Sequential(*layers)  # output layer
-        # self.encoder.fc[-2].bias.requires_grad = False  # hack: not use bias as it is followed by BN
+        self.encoder.fc[-2].bias.requires_grad = False  # hack: not use bias as it is followed by BN
 
         # build a 2-layer predictor
         self.predictor = nn.Sequential(nn.Linear(dim, pred_dim, bias=False),
