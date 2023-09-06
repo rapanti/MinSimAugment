@@ -242,7 +242,7 @@ def get_args_parser():
     p.add_argument('-a', '--arch', type=str,
                    help="Name of architecture to train (default: resnet50)")
     p.add_argument('--epochs', type=int,
-                   help='number of total epochs to run (default: 90)')
+                   help='number of total epochs to run (default: 100)')
     p.add_argument('-b', '--batch-size', type=int, default=256,
                    help='total-batch-size (default: 256)')
     p.add_argument('--lr', type=float, default=0.3,
