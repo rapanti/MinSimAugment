@@ -77,10 +77,10 @@ def main(cfg):
         sys.exit(1)
 
     model = models.resnet50().cuda()
-
-    state_dict = torch.load(cfg.pretrained, map_location='cpu')
-    missing_keys, unexpected_keys = model.load_state_dict(state_dict, strict=False)
-    assert missing_keys == ['fc.weight', 'fc.bias'] and unexpected_keys == []
+    utils.load_pretrained_weights(model, cfg.pretrained, cfg.ckp_key)
+    # state_dict = torch.load(cfg.pretrained, map_location='cpu')
+    # missing_keys, unexpected_keys = model.load_state_dict(state_dict, strict=False)
+    # assert missing_keys == ['fc.weight', 'fc.bias'] and unexpected_keys == []
     model.fc.weight.data.normal_(mean=0.0, std=0.01)
     model.fc.bias.data.zero_()
 

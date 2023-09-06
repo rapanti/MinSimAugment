@@ -277,9 +277,9 @@ def load_pretrained_weights(model, pretrained_weights, checkpoint_key):
             state_dict = state_dict[checkpoint_key]
         for k in list(state_dict.keys()):
             # retain only encoder up to before the embedding layer
-            if k.startswith('module.encoder') and not k.startswith('module.encoder.fc'):
+            if k.startswith('module.backbone') and not k.startswith('module.backbone.fc'):
                 # remove prefix
-                state_dict[k[len("module.encoder."):]] = state_dict[k]
+                state_dict[k[len("module.backbone."):]] = state_dict[k]
             # delete renamed or unused k
             del state_dict[k]
 
