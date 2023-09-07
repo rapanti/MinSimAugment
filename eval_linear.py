@@ -198,7 +198,8 @@ def train(loader, model, criterion, optimizer, epoch, cfg, board, scheduler):
     reference_state_dict = reference_model.state_dict()
     model_state_dict = model.module.state_dict()
     for k in reference_state_dict:
-        assert torch.equal(model_state_dict[k].cpu(), reference_state_dict[k]), k
+        if not k.startswith("fc"):
+            assert torch.equal(model_state_dict[k].cpu(), reference_state_dict[k]), k
 
     scheduler.step()
     metric_logger.synchronize_between_processes()
