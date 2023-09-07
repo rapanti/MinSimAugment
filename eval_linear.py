@@ -192,7 +192,7 @@ def train(loader, model, criterion, optimizer, epoch, cfg, board, scheduler):
             board.add_scalar(tag="eval loss", scalar_value=loss.item(), global_step=it)
 
     # sanity check
-    reference_model = models.resnet50().cuda()
+    reference_model = models.resnet50()
     utils.load_pretrained_weights(reference_model, cfg.pretrained, cfg.ckp_key)
     # reference_state_dict = torch.load(cfg.pretrained, map_location='cpu')
     reference_state_dict = reference_model.state_dict()
