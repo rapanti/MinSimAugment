@@ -39,7 +39,8 @@ class SimSiam(nn.Module):
                 nn.ReLU(inplace=True),
             ])
         layers.extend([
-            self.encoder.fc,
+            # self.encoder.fc,
+            nn.Linear(hidden_dim, dim, bias=False),
             nn.BatchNorm1d(dim, affine=False)
         ])
         self.encoder.fc = nn.Sequential(*layers)  # output layer
