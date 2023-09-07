@@ -30,10 +30,10 @@ if __name__ == "__main__":
     eval_linear_cfg.batch_size = 512
     eval_linear_cfg.finetune = True
     eval_linear_cfg.lr = 7.5e-6
-    eval_linear_cfg.weight_decay = 0.005
+    eval_linear_cfg.weight_decay = 0.05
     eval_linear_cfg.optimizer = "adamw"
     eval_linear_cfg.epochs = 300
-    eval_linear_cfg.data_path = "../datasets"
+    eval_linear_cfg.data_path = "/work/dlclarge1/ferreira-simsiam/minsim_experiments/datasets"
     eval_linear.main(eval_linear_cfg)
 
     print('*************STARTING FINETUNING: CIFAR100*************')
@@ -41,10 +41,10 @@ if __name__ == "__main__":
     eval_linear_cfg.batch_size = 512
     eval_linear_cfg.finetune = True
     eval_linear_cfg.lr = 5e-6
-    eval_linear_cfg.weight_decay = 0.005
+    eval_linear_cfg.weight_decay = 0.05
     eval_linear_cfg.optimizer = "adamw"
     eval_linear_cfg.epochs = 300
-    eval_linear_cfg.data_path = "../datasets"
+    eval_linear_cfg.data_path = "/work/dlclarge1/ferreira-simsiam/minsim_experiments/datasets"
     eval_linear.main(eval_linear_cfg)
 
     print('*************STARTING LINEAR EVAL EVALUATION: Flowers102*************')
@@ -52,17 +52,17 @@ if __name__ == "__main__":
     eval_linear_cfg.batch_size = 512
     eval_linear_cfg.finetune = True
     eval_linear_cfg.lr = 5e-4
-    eval_linear_cfg.weight_decay = 0.005
+    eval_linear_cfg.weight_decay = 0.05
     eval_linear_cfg.optimizer = "adamw"
     eval_linear_cfg.epochs = 300
-    eval_linear_cfg.data_path = "../datasets"
+    eval_linear_cfg.data_path = "/work/dlclarge1/ferreira-simsiam/minsim_experiments/datasets"
     eval_linear.main(eval_linear_cfg)
 
     print('*************STARTING LINEAR EVAL EVALUATION: iNaturalist (using train_mini)*************')
     eval_linear_cfg.dataset = "inat21"
     eval_linear_cfg.batch_size = 512
     eval_linear_cfg.lr = 5e-5
-    eval_linear_cfg.weight_decay = 0.005
+    eval_linear_cfg.weight_decay = 0.05
     eval_linear_cfg.epochs = 100
     eval_linear_cfg.optimizer = "adamw"
     eval_linear_cfg.data_path = "/work/dlclarge1/ferreira-simsiam/minsim_experiments/datasets"
@@ -83,13 +83,3 @@ if __name__ == "__main__":
     eval_knn_cfg.timeout = datetime.timedelta(seconds=1800*20)
 
     eval_knn.main(eval_knn_cfg)
-
-    # TODO: source currently offline
-    # print('*************STARTING LINEAR EVAL EVALUATION: StanfordCars*************')
-    # eval_linear_cfg.dataset = "StanfordCars"
-    # eval_linear_cfg.batch_size = 512
-    # eval_linear_cfg.lr = 0.001
-    # eval_linear_cfg.weight_decay = 0.0005
-    # eval_linear_cfg.epochs = 300
-    # eval_linear_cfg.data_path = "../datasets"
-    # eval_linear.main(eval_linear_cfg)
