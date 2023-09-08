@@ -121,7 +121,7 @@ def make_dataset(
         version = "2021_train_mini" if train else "2021_valid"
         return INaturalist(root, download=False, version=version, transform=transform), 10000
     elif dataset == "Places365":
-        split = "train-standard" if train else "valid"
+        split = "train-standard" if train else "val"
         return Places365(root, download=True, split=split, transform=transform), 365
     elif dataset == 'ImageNet':
         root = os.path.join(root, 'train' if train else 'val')
