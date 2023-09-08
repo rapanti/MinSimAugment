@@ -27,7 +27,7 @@ class SimSiam(nn.Module):
             hidden_dim = input_dim
 
         layers = [
-            nn.Linear(hidden_dim, hidden_dim, bias=False),
+            nn.Linear(input_dim, hidden_dim, bias=False),
             nn.BatchNorm1d(hidden_dim),
             nn.ReLU(inplace=True),
         ]

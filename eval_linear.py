@@ -101,6 +101,7 @@ def main(cfg):
     # load weights to evaluate
     utils.load_pretrained_weights(model, cfg.pretrained, cfg.ckp_key)
     print(f"Model {cfg.arch} built.")
+    print(model)
 
     # init the fc layer
     linear_classifier = LinearClassifier(embed_dim, num_labels=cfg.num_labels)
