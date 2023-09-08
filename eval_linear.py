@@ -112,7 +112,6 @@ def main(cfg):
         run_variables=to_restore,
         model=model,
         optimizer=optimizer,
-        scheduler=scheduler,
     )
     start_epoch = to_restore["epoch"]
     best_acc = to_restore["best_acc"]
