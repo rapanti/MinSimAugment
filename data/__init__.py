@@ -4,7 +4,7 @@ from typing import Sequence, Tuple
 
 from torchvision.transforms import CenterCrop, ColorJitter, Compose, GaussianBlur, InterpolationMode,  \
     Normalize, RandomApply, RandomGrayscale, RandomHorizontalFlip, RandomResizedCrop, Resize, ToTensor
-from torchvision.datasets import CIFAR10, CIFAR100, ImageFolder, FakeData, Flowers102, StanfordCars, INaturalist
+from torchvision.datasets import CIFAR10, CIFAR100, ImageFolder, FakeData, Flowers102, StanfordCars, INaturalist, Places365
 
 IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
@@ -122,6 +122,9 @@ def make_dataset(
     elif dataset == "inat21":
         version = "2021_train_mini" if train else "2021_valid"
         return INaturalist(root, download=False, version=version, transform=transform), 10000
+    elif dataset == "Places365":
+        split = "train-standard" if train else "val"
+        return Places365(root, download=False, split=split, transform=transform), 365
     elif dataset == 'ImageNet':
         root = os.path.join(root, 'train' if train else 'val')
         dataset = ImageFolder(root, transform=transform)

@@ -68,6 +68,17 @@ if __name__ == "__main__":
     eval_linear_cfg.data_path = "/work/dlclarge1/ferreira-simsiam/minsim_experiments/datasets"
     eval_linear.main(eval_linear_cfg)
 
+    print('*************STARTING LINEAR EVAL EVALUATION: Places365*************')
+    eval_linear_cfg.dataset = "Places365"
+    eval_linear_cfg.batch_size = 512
+    eval_linear_cfg.finetune = True
+    eval_linear_cfg.lr = 5e-5
+    eval_linear_cfg.weight_decay = 0.05
+    eval_linear_cfg.optimizer = "adamw"
+    eval_linear_cfg.epochs = 300
+    eval_linear_cfg.data_path = "/work/dlclarge1/ferreira-simsiam/minsim_experiments/datasets"
+    eval_linear.main(eval_linear_cfg)
+
     print('STARTING kNN EVALUATION')
     # knn code currently times out when using multiple GPUs and when using cuda -> increase timeout interval to 10h
     # make sure to run knn eval last
