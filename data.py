@@ -108,12 +108,12 @@ def make_dataset(
         train: bool,
         transform):
     if dataset == 'CIFAR10':
-        return CIFAR10(root, download=True, train=train, transform=transform), 10
+        return CIFAR10(root, download=False, train=train, transform=transform), 10
     elif dataset == 'CIFAR100':
-        return CIFAR100(root, download=True, train=train, transform=transform), 100
+        return CIFAR100(root, download=False, train=train, transform=transform), 100
     elif dataset == "Flowers102":
         split = "train" if train else "test"
-        return Flowers102(root, download=True, split=split, transform=transform), 102
+        return Flowers102(root, download=False, split=split, transform=transform), 102
     elif dataset == "StanfordCars":
         split = "train" if train else "test"
         return StanfordCars(root, download=True, split=split, transform=transform), 196

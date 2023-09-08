@@ -64,7 +64,7 @@ if __name__ == "__main__":
     eval_linear_cfg.weight_decay = 0.05
     eval_linear_cfg.optimizer = "adamw"
     eval_linear_cfg.epochs = 300
-    eval_linear_cfg.data_path = "/work/dlclarge1/ferreira-simsiam/minsim_experiments/datasets"
+    eval_linear_cfg.data_path = "/work/dlclarge1/ferreira-simsiam/minsim_experiments/datasets/places365"
     eval_linear.main(eval_linear_cfg)
 
     print('*************STARTING LINEAR EVAL EVALUATION: iNaturalist (using train_mini)*************')
