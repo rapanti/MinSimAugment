@@ -28,7 +28,7 @@ if __name__ == "__main__":
     eval_linear_cfg.batch_size = 512
     eval_linear_cfg.finetune = True
     eval_linear_cfg.lr = 7.5e-6
-    eval_linear_cfg.weight_decay = 0.005
+    eval_linear_cfg.weight_decay = 0.05
     eval_linear_cfg.optimizer = "adamw"
     eval_linear_cfg.epochs = 300
     eval_linear_cfg.data_path = "../datasets"
@@ -39,7 +39,7 @@ if __name__ == "__main__":
     eval_linear_cfg.batch_size = 512
     eval_linear_cfg.finetune = True
     eval_linear_cfg.lr = 5e-6
-    eval_linear_cfg.weight_decay = 0.005
+    eval_linear_cfg.weight_decay = 0.05
     eval_linear_cfg.optimizer = "adamw"
     eval_linear_cfg.epochs = 300
     eval_linear_cfg.data_path = "../datasets"
@@ -50,7 +50,18 @@ if __name__ == "__main__":
     eval_linear_cfg.batch_size = 512
     eval_linear_cfg.finetune = True
     eval_linear_cfg.lr = 5e-4
-    eval_linear_cfg.weight_decay = 0.005
+    eval_linear_cfg.weight_decay = 0.05
+    eval_linear_cfg.optimizer = "adamw"
+    eval_linear_cfg.epochs = 300
+    eval_linear_cfg.data_path = "../datasets"
+    eval_linear.main(eval_linear_cfg)
+
+    print('*************STARTING LINEAR EVAL EVALUATION: Places365*************')
+    eval_linear_cfg.dataset = "Places365"
+    eval_linear_cfg.batch_size = 512
+    eval_linear_cfg.finetune = True
+    eval_linear_cfg.lr = 5e-5
+    eval_linear_cfg.weight_decay = 0.05
     eval_linear_cfg.optimizer = "adamw"
     eval_linear_cfg.epochs = 300
     eval_linear_cfg.data_path = "../datasets"
