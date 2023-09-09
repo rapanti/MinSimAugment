@@ -91,6 +91,7 @@ def main(cfg):
         batch_size=cfg.batch_size_per_gpu,
         num_workers=cfg.num_workers,
         pin_memory=True,
+        drop_last=True,  # required since select_crops_cross dives batch into chunk_size
         # collate_fn=custom_collate,
     )
 
