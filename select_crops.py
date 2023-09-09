@@ -19,7 +19,7 @@ def select_crops_cross(images, model, fp16, cfg):
     model_out = model_out.chunk(len(images))
 
     out1 = torch.zeros_like(images[0])
-    out2 = torch.zeros_like(images[0])
+    out2 = torch.zeros_like(images[1])
     score = torch.full([b], -torch.inf, device=device)
     selected = torch.zeros((2, b), dtype=torch.uint8)
 
@@ -36,6 +36,8 @@ def select_crops_cross(images, model, fp16, cfg):
                     c = a_norm.T @ b_norm
 
                     # sum the cross-correlation matrix between all gpus
+                    print(f"{b=}")
+                    print(f"{chunk_size=}")
                     c.div_(b//chunk_size)
 
                     on_diag = torch.diagonal(c).add_(-1).pow_(2).sum()
