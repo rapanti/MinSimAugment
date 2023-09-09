@@ -156,7 +156,7 @@ def train(loader, model, optimizer, epoch, cfg, fp16, board):
         with torch.cuda.amp.autocast(fp16 is not None):
             loss = model.forward(images[0], images[1])
             loss /= cfg.grad_accum_steps
-            # total_loss += loss.detach()
+            total_loss += loss.detach()
 
             if ((it+1) % cfg.grad_accum_steps == 0) or (it + 1 == len(loader)):
                 if fp16 is None:
@@ -169,12 +169,12 @@ def train(loader, model, optimizer, epoch, cfg, fp16, board):
 
             # logging
             torch.cuda.synchronize()
-            # metric_logger.update(loss=total_loss.item())
-            metric_logger.update(loss=loss.item())
+            metric_logger.update(loss=total_loss.item())
+            # metric_logger.update(loss=loss.item())
             metric_logger.update(lr=optimizer.param_groups[0]["lr"])
 
-            # metrics["loss"].append(total_loss.item())
-            metrics["loss"].append(loss.item())
+            metrics["loss"].append(total_loss.item())
+            # metrics["loss"].append(loss.item())
             metrics["lr"].append(optimizer.param_groups[0]["lr"])
 
             if dist.is_main_process() and it % cfg.logger_freq == 0:
@@ -184,11 +184,11 @@ def train(loader, model, optimizer, epoch, cfg, fp16, board):
                 #     metrics["params"].append(params)
                 #     metrics["sample-loss"].append(sample_loss.tolist())
 
-                # board.add_scalar("training loss", total_loss.item(), it)
-                board.add_scalar("training loss", loss.item(), it)
+                board.add_scalar("training loss", total_loss.item(), it)
+                # board.add_scalar("training loss", loss.item(), it)
                 board.add_scalar("training lr", optimizer.param_groups[0]["lr"], it)
 
-            total_loss = 0
+        total_loss = 0
 
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
