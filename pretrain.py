@@ -47,6 +47,8 @@ def main(cfg):
         sys.exit(1)
 
     model = BarlowTwins(cfg).cuda()
+    if utils.has_batchnorms(model):
+        model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
 
     param_weights = []
     param_biases = []
@@ -57,11 +59,7 @@ def main(cfg):
             param_weights.append(param)
 
     parameters = [{'params': param_weights}, {'params': param_biases}]
-
-    if utils.has_batchnorms(model):
-        model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
     model = nn.parallel.DistributedDataParallel(model, device_ids=[cfg.gpu])
-
     optimizer = LARS(parameters, lr=0, weight_decay=cfg.weight_decay,
                      weight_decay_filter=True,
                      lars_adaptation_filter=True)
@@ -160,14 +158,14 @@ def train(loader, model, optimizer, epoch, cfg, fp16, board):
             loss /= cfg.grad_accum_steps
             total_loss += loss.detach()
 
-        if not (it+1) % cfg.grad_accum_steps:
-            if fp16 is None:
-                loss.backward()
-                optimizer.step()
-            else:
-                fp16.scale(loss).backward()
-                fp16.step(optimizer)
-                fp16.update()
+            if not (it+1) % cfg.grad_accum_steps:
+                if fp16 is None:
+                    loss.backward()
+                    optimizer.step()
+                else:
+                    fp16.scale(loss).backward()
+                    fp16.step(optimizer)
+                    fp16.update()
 
             # logging
             torch.cuda.synchronize()
@@ -226,7 +224,7 @@ def get_args_parser():
     p.add_argument('-b', '--batch_size', default=2048, type=int,
                    help='total batch-size (default: 2048)')
 
-    p.add_argument('--wd', '--weight_decay', default=1.5e-6, dest="weight_decay", type=float,
+    p.add_argument('--wd', '--weight_decay', default=1e-6, dest="weight_decay", type=float,
                    help='weight decay (default: 1.5e-6)')
 
     # BT specific parameters:
