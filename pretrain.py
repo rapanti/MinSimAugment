@@ -150,7 +150,7 @@ def train(loader, model, optimizer, epoch, cfg, fp16, board, select_fn):
 
         images = [im.cuda(non_blocking=True) for im in images]
 
-        x1, x2, selected, sample_loss = select_fn(images, model, fp16)
+        x1, x2, selected, sample_loss = select_fn(images, model, fp16, cfg)
 
         optimizer.zero_grad()
         with torch.cuda.amp.autocast(fp16 is not None):
