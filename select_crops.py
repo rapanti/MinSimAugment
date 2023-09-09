@@ -31,12 +31,13 @@ def select_crops_cross(images, model, fp16, cfg):
             chunk_losses = torch.zeros(b, device=device)
             with torch.cuda.amp.autocast(fp16 is not None):
                 for i, (a, b) in enumerate(zip(p1.chunk(chunk_size), p2.chunk(chunk_size))):
+                    # TODO: use model.bn?
                     a_norm = (a - a.mean() / a.std())
                     b_norm = (b - b.mean() / b.std())
                     c = a_norm.T @ b_norm
 
                     # sum the cross-correlation matrix between all gpus
-                    print(f"{b=}")
+                    print(f"{b.size()=}")
                     print(f"{chunk_size=}")
                     c.div_(b//chunk_size)
 
