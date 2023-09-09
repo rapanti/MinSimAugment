@@ -70,6 +70,7 @@ if __name__ == "__main__":
     print('*************STARTING LINEAR EVAL EVALUATION: iNaturalist (using train_mini)*************')
     eval_linear_cfg.dataset = "inat21"
     eval_linear_cfg.batch_size = 512
+    eval_linear_cfg.finetune = True
     eval_linear_cfg.lr = 7.5e-5
     eval_linear_cfg.weight_decay = 0.05
     eval_linear_cfg.epochs = 100
