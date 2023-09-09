@@ -12,7 +12,7 @@ def select_crops_identity(images, model, fp16, **kwargsarg):
 def select_crops_cross(images, model, fp16, cfg):
     batch_dim, c, h, w = images[0].shape
     device = images[0].device
-    chunk_size = 8
+    chunk_size = 4
     assert batch_dim % chunk_size == 0, "batch size must be divisible by chunk size"
 
     with torch.cuda.amp.autocast(fp16 is not None):
