@@ -27,3 +27,6 @@ projector: 8192-8192-8192
 learning_rate_weights: 0.2
 learning_rate_biases: 0.0048
 grad_accum_steps: 1
+use_adv_metric: true
+adv_metric_freq: 10
+logger_freq: 50

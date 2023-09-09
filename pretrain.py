@@ -94,7 +94,7 @@ def main(cfg):
         # collate_fn=custom_collate,
     )
 
-    # select_fn = select_crops.names[cfg.select_fn]
+    select_fn = select_crops.names[cfg.select_fn]
 
     log_dir = os.path.join(cfg.output_dir, "tensorboard")
     board = SummaryWriter(log_dir) if dist.is_main_process() else None
@@ -103,7 +103,7 @@ def main(cfg):
         loader.sampler.set_epoch(epoch)
 
         start = time.time()
-        train_stats, metrics = train(loader, model, optimizer, epoch, cfg, fp16, board)
+        train_stats, metrics = train(loader, model, optimizer, epoch, cfg, fp16, board, select_fn)
         total_time += int(time.time() - start)
 
         save_dict = {
@@ -129,7 +129,7 @@ def main(cfg):
     print('Training time {}'.format(total_time_str))
 
 
-def train(loader, model, optimizer, epoch, cfg, fp16, board):
+def train(loader, model, optimizer, epoch, cfg, fp16, board, select_fn):
     model.train()
     metrics = {
         "epoch": epoch,
@@ -150,11 +150,11 @@ def train(loader, model, optimizer, epoch, cfg, fp16, board):
 
         images = [im.cuda(non_blocking=True) for im in images]
 
-        # x1, x2, selected, sample_loss = select_fn(images, model, fp16)
+        x1, x2, selected, sample_loss = select_fn(images, model, fp16)
 
         optimizer.zero_grad()
         with torch.cuda.amp.autocast(fp16 is not None):
-            loss = model.forward(images[0], images[1])
+            loss = model.forward(x1, x2)
             loss /= cfg.grad_accum_steps
             total_loss += loss.detach()
 
@@ -179,10 +179,10 @@ def train(loader, model, optimizer, epoch, cfg, fp16, board):
 
             if dist.is_main_process() and it % cfg.logger_freq == 0:
                 log_step = it // cfg.grad_accum_steps
-                # if cfg.use_adv_metric and not log_step % cfg.adv_metric_freq:
-                #     metrics["selected"].append(selected.tolist())
+                if cfg.use_adv_metric and not log_step % cfg.adv_metric_freq:
+                    metrics["selected"].append(selected.tolist())
+                    metrics["sample-loss"].append(sample_loss.tolist())
                 #     metrics["params"].append(params)
-                #     metrics["sample-loss"].append(sample_loss.tolist())
 
                 board.add_scalar("training loss", total_loss.item(), it)
                 # board.add_scalar("training loss", loss.item(), it)
