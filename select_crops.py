@@ -10,9 +10,10 @@ def select_crops_identity(images, model, fp16, **kwargsarg):
 
 @torch.no_grad()
 def select_crops_cross(images, model, fp16, cfg):
-    b, c, h, w = images[0].shape
+    batch_dim, c, h, w = images[0].shape
     device = images[0].device
-    chunk_size = 2
+    chunk_size = 8
+    assert batch_dim % chunk_size == 0, "batch size must be divisible by chunk size"
 
     with torch.cuda.amp.autocast(fp16 is not None):
         model_out = model.module.single_forward(torch.cat(images, dim=0))
@@ -20,26 +21,26 @@ def select_crops_cross(images, model, fp16, cfg):
 
     out1 = torch.zeros_like(images[0])
     out2 = torch.zeros_like(images[1])
-    score = torch.full([b], -torch.inf, device=device)
-    selected = torch.zeros((2, b), dtype=torch.uint8)
+    score = torch.full([batch_dim], -torch.inf, device=device)
+    selected = torch.zeros((2, batch_dim), dtype=torch.uint8)
 
     for n in range(len(images)):
         p1 = model_out[n]
         for m in range(n + 1, len(images)):
             p2 = model_out[m]
 
-            chunk_losses = torch.zeros(b, device=device)
+            chunk_losses = torch.zeros(batch_dim, device=device)
             with torch.cuda.amp.autocast(fp16 is not None):
                 for i, (a, b) in enumerate(zip(p1.chunk(chunk_size), p2.chunk(chunk_size))):
                     # TODO: use model.bn?
-                    a_norm = (a - a.mean() / a.std())
-                    b_norm = (b - b.mean() / b.std())
-                    c = a_norm.T @ b_norm
+                    # a_norm = (a - a.mean() / a.std())
+                    # b_norm = (b - b.mean() / b.std())
+                    # c = a_norm.T @ b_norm
+                    
+                    c = model.bn(a).T @ model.bn(b)
 
                     # sum the cross-correlation matrix between all gpus
-                    print(f"{b.size()=}")
-                    print(f"{chunk_size=}")
-                    c.div_(b//chunk_size)
+                    c.div_(batch_dim//chunk_size)
 
                     on_diag = torch.diagonal(c).add_(-1).pow_(2).sum()
                     off_diag = off_diagonal(c).pow_(2).sum()
