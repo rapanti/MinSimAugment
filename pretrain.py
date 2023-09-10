@@ -203,13 +203,13 @@ def train(loader, model, criterion, optimizer, epoch, cfg, fp16, board, select_f
         if fp16 is None:
             loss.backward()
             if cfg.clip_grad:
-                _ = utils.clip_gradients(model, args.clip_grad)
+                _ = utils.clip_gradients(model, cfg.clip_grad)
             optimizer.step()
         else:
             fp16.scale(loss).backward()
-            if args.clip_grad:
+            if cfg.clip_grad:
                 fp16.unscale_(optimizer)  # unscale the gradients of optimizer's assigned params in-place
-                _ = utils.clip_gradients(model, args.clip_grad)
+                _ = utils.clip_gradients(model, cfg.clip_grad)
 
             fp16.step(optimizer)
             fp16.update()
