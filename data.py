@@ -5,7 +5,7 @@ from typing import Sequence, Tuple
 from torchvision.transforms import CenterCrop, ColorJitter, Compose, GaussianBlur, InterpolationMode,  \
     Normalize, RandomApply, RandomGrayscale, RandomHorizontalFlip, RandomResizedCrop, Resize, ToTensor
 from torchvision.datasets import CIFAR10, CIFAR100, ImageFolder, VOCDetection, INaturalist, Places365, \
-    FakeData, Flowers102, StanfordCars, INaturalist
+    FakeData, Flowers102, StanfordCars, INaturalist, Food101
 
 
 IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
@@ -111,6 +111,9 @@ def make_dataset(
         return CIFAR10(root, download=False, train=train, transform=transform), 10
     elif dataset == 'CIFAR100':
         return CIFAR100(root, download=False, train=train, transform=transform), 100
+    elif dataset == 'Food101':
+        split = "train" if train else "test"
+        return Food101(root, download=True, split=split, transform=transform), 101
     elif dataset == "Flowers102":
         split = "train" if train else "test"
         return Flowers102(root, download=False, split=split, transform=transform), 102

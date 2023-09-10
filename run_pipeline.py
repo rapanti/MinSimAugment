@@ -14,6 +14,8 @@ if __name__ == "__main__":
     print('*************STARTING PRETRAINING*************')
     pretrain.main(cfg)
 
+    ################## LINEAR EVALUATION ##################
+
     print('*************STARTING LINEAR EVAL EVALUATION: ImageNet*************')
     eval_linear_cfg = OmegaConf.load("eval_linear.yaml")
     # copy dist parameters
@@ -22,6 +24,50 @@ if __name__ == "__main__":
     eval_linear_cfg.world_size = cfg.world_size
     eval_linear_cfg.dist_url = cfg.dist_url
     eval_linear.main(eval_linear_cfg)
+
+    print('*************STARTING LINEAR EVALUATION: CIFAR10*************')
+    eval_linear_cfg.dataset = "CIFAR10"
+    eval_linear_cfg.batch_size = 512
+    eval_linear_cfg.finetune = False
+    eval_linear_cfg.data_path = "../datasets"
+    eval_linear.main(eval_linear_cfg)
+
+    print('*************STARTING LINEAR EVALUATION: CIFAR100*************')
+    eval_linear_cfg.dataset = "CIFAR10"
+    eval_linear_cfg.batch_size = 512
+    eval_linear_cfg.finetune = False
+    eval_linear_cfg.data_path = "../datasets"
+    eval_linear.main(eval_linear_cfg)
+
+    print('*************STARTING LINEAR EVALUATION: FOOD101*************')
+    eval_linear_cfg.dataset = "Food101"
+    eval_linear_cfg.batch_size = 512
+    eval_linear_cfg.finetune = False
+    eval_linear_cfg.data_path = "../datasets"
+    eval_linear.main(eval_linear_cfg)
+
+    print('*************STARTING LINEAR EVALUATION: Flowers102*************')
+    eval_linear_cfg.dataset = "Flowers102"
+    eval_linear_cfg.batch_size = 512
+    eval_linear_cfg.finetune = False
+    eval_linear_cfg.data_path = "../datasets"
+    eval_linear.main(eval_linear_cfg)
+
+    print('*************STARTING LINEAR EVALUATION: Places365*************')
+    eval_linear_cfg.dataset = "Places365"
+    eval_linear_cfg.batch_size = 512
+    eval_linear_cfg.finetune = False
+    eval_linear_cfg.data_path = "/work/dlclarge1/ferreira-simsiam/minsim_experiments/datasets/places365"
+    eval_linear.main(eval_linear_cfg)
+
+    print('*************STARTING LINEAR EVALUATION: iNaturalist (using train_mini)*************')
+    eval_linear_cfg.dataset = "inat21"
+    eval_linear_cfg.batch_size = 512
+    eval_linear_cfg.finetune = False
+    eval_linear_cfg.data_path = "/work/dlclarge1/ferreira-simsiam/minsim_experiments/datasets"
+    eval_linear.main(eval_linear_cfg)
+
+    ################## FINE-TUNING ##################
 
     print('*************STARTING FINETUNING: CIFAR10*************')
     eval_linear_cfg.dataset = "CIFAR10"
@@ -45,7 +91,18 @@ if __name__ == "__main__":
     eval_linear_cfg.data_path = "../datasets"
     eval_linear.main(eval_linear_cfg)
 
-    print('*************STARTING LINEAR EVAL EVALUATION: Flowers102*************')
+    print('*************STARTING FINETUNING: FOOD101*************')
+    eval_linear_cfg.dataset = "Food101"
+    eval_linear_cfg.batch_size = 512
+    eval_linear_cfg.finetune = True
+    eval_linear_cfg.lr = 5e-6
+    eval_linear_cfg.weight_decay = 0.05
+    eval_linear_cfg.optimizer = "adamw"
+    eval_linear_cfg.epochs = 300
+    eval_linear_cfg.data_path = "../datasets"
+    eval_linear.main(eval_linear_cfg)
+
+    print('*************STARTING FINETUNING: Flowers102*************')
     eval_linear_cfg.dataset = "Flowers102"
     eval_linear_cfg.batch_size = 512
     eval_linear_cfg.finetune = True
@@ -56,7 +113,7 @@ if __name__ == "__main__":
     eval_linear_cfg.data_path = "../datasets"
     eval_linear.main(eval_linear_cfg)
 
-    print('*************STARTING LINEAR EVAL EVALUATION: Places365*************')
+    print('*************STARTING FINETUNING: Places365*************')
     eval_linear_cfg.dataset = "Places365"
     eval_linear_cfg.batch_size = 512
     eval_linear_cfg.finetune = True
