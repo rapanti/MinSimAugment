@@ -202,9 +202,15 @@ def train(loader, model, criterion, optimizer, epoch, cfg, fp16, board, select_f
         optimizer.zero_grad()
         if fp16 is None:
             loss.backward()
+            if cfg.clip_grad:
+                _ = utils.clip_gradients(model, args.clip_grad)
             optimizer.step()
         else:
             fp16.scale(loss).backward()
+            if args.clip_grad:
+                fp16.unscale_(optimizer)  # unscale the gradients of optimizer's assigned params in-place
+                _ = utils.clip_gradients(model, args.clip_grad)
+
             fp16.step(optimizer)
             fp16.update()
 
@@ -315,6 +321,9 @@ def get_args_parser():
                    help="Log advanced metrics: transforms params, crop selection, sample-loss, ... (default: False)")
     p.add_argument("--adv_metric_freq", default=10, type=int,
                    help="Log advanced metrics every x iterations (default: 100)")
+    p.add_argument('--clip_grad', type=float, default=0.0, help="""Maximal parameter
+        gradient norm if using gradient clipping. Clipping with norm .3 ~ 1.0 can
+        help optimization for larger ViT architectures. 0 for disabling.""")
 
     return p
 

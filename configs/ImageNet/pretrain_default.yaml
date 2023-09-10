@@ -23,3 +23,4 @@ num_crops: 2
 data_path: null
 output_dir: null
 optimizer: sgd
+clip_grad: 0.0
