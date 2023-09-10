@@ -148,6 +148,8 @@ def main(cfg):
     to_restore = {"epoch": 0, "best_acc": 0.}
 
     checkpoint_name = "checkpoint.pth.tar" if cfg.dataset == "ImageNet" else f"checkpoint_{cfg.dataset}.pth.tar"
+    if not cfg.finetune:
+        checkpoint_name = f"checkpoint.pth.tar" if cfg.dataset == "ImageNet" else f"checkpoint_{cfg.dataset}_linear_eval.pth.tar"
 
     if cfg.finetune:
         # load classifier and backbone
