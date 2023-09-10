@@ -33,7 +33,7 @@ if __name__ == "__main__":
     eval_linear.main(eval_linear_cfg)
 
     print('*************STARTING LINEAR EVALUATION: CIFAR100*************')
-    eval_linear_cfg.dataset = "CIFAR10"
+    eval_linear_cfg.dataset = "CIFAR100"
     # eval_linear_cfg.batch_size = 512
     eval_linear_cfg.finetune = False
     eval_linear_cfg.data_path = "../datasets"
