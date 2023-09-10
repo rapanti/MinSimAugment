@@ -27,42 +27,42 @@ if __name__ == "__main__":
 
     print('*************STARTING LINEAR EVALUATION: CIFAR10*************')
     eval_linear_cfg.dataset = "CIFAR10"
-    eval_linear_cfg.batch_size = 512
+    # eval_linear_cfg.batch_size = 512
     eval_linear_cfg.finetune = False
     eval_linear_cfg.data_path = "../datasets"
     eval_linear.main(eval_linear_cfg)
 
     print('*************STARTING LINEAR EVALUATION: CIFAR100*************')
     eval_linear_cfg.dataset = "CIFAR10"
-    eval_linear_cfg.batch_size = 512
+    # eval_linear_cfg.batch_size = 512
     eval_linear_cfg.finetune = False
     eval_linear_cfg.data_path = "../datasets"
     eval_linear.main(eval_linear_cfg)
 
     print('*************STARTING LINEAR EVALUATION: FOOD101*************')
     eval_linear_cfg.dataset = "Food101"
-    eval_linear_cfg.batch_size = 512
+    # eval_linear_cfg.batch_size = 512
     eval_linear_cfg.finetune = False
     eval_linear_cfg.data_path = "../datasets"
     eval_linear.main(eval_linear_cfg)
 
     print('*************STARTING LINEAR EVALUATION: Flowers102*************')
     eval_linear_cfg.dataset = "Flowers102"
-    eval_linear_cfg.batch_size = 512
+    # eval_linear_cfg.batch_size = 512
     eval_linear_cfg.finetune = False
     eval_linear_cfg.data_path = "../datasets"
     eval_linear.main(eval_linear_cfg)
 
     print('*************STARTING LINEAR EVALUATION: Places365*************')
     eval_linear_cfg.dataset = "Places365"
-    eval_linear_cfg.batch_size = 512
+    # eval_linear_cfg.batch_size = 512
     eval_linear_cfg.finetune = False
     eval_linear_cfg.data_path = "/work/dlclarge1/ferreira-simsiam/minsim_experiments/datasets/places365"
     eval_linear.main(eval_linear_cfg)
 
     print('*************STARTING LINEAR EVALUATION: iNaturalist (using train_mini)*************')
     eval_linear_cfg.dataset = "inat21"
-    eval_linear_cfg.batch_size = 512
+    # eval_linear_cfg.batch_size = 512
     eval_linear_cfg.finetune = False
     eval_linear_cfg.data_path = "/work/dlclarge1/ferreira-simsiam/minsim_experiments/datasets"
     eval_linear.main(eval_linear_cfg)
