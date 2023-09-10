@@ -4,7 +4,7 @@ from utils import off_diagonal
 
 
 @torch.no_grad()
-def select_crops_identity(images, model, fp16, **kwargsarg):
+def select_crops_identity(images, model, fp16, cfg, **kwargsarg):
     return images[0], images[1], torch.zeros(1), torch.zeros(1)
 
 
