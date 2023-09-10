@@ -8,7 +8,6 @@ from collections import defaultdict, deque
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.distributed
 
 import distributed as dist
 
@@ -161,7 +160,7 @@ def reduce_dict(input_dict, average=True):
     have the averaged results. Returns a dict with the same fields as
     input_dict, after reduction.
     """
-    world_size = dist.get_world_size()
+    world_size = dist.world_size()
     if world_size < 2:
         return input_dict
     with torch.no_grad():
@@ -252,42 +251,41 @@ class MetricLogger(object):
                 eta_string = str(datetime.timedelta(seconds=int(eta_seconds)))
                 if torch.cuda.is_available():
                     print(log_msg.format(
-                        i, len(iterable), eta=eta_string,
+                        i, len(iterable),
+                        eta=eta_string,
                         meters=str(self),
-                        time=str(iter_time), data=str(data_time),
+                        time=str(iter_time),
+                        data=str(data_time),
                         memory=torch.cuda.max_memory_allocated() / MB))
                 else:
                     print(log_msg.format(
-                        i, len(iterable), eta=eta_string,
+                        i, len(iterable),
+                        eta=eta_string,
                         meters=str(self),
-                        time=str(iter_time), data=str(data_time)))
+                        time=str(iter_time),
+                        data=str(data_time)))
             i += 1
             end = time.time()
         total_time = time.time() - start_time
         total_time_str = str(datetime.timedelta(seconds=int(total_time)))
-        print('{} Total time: {} ({:.6f} s / it)'.format(
-            header, total_time_str, total_time / len(iterable)))
+        print('{} Total time: {} ({:.6f} s / it)'.format(header, total_time_str, total_time / len(iterable)))
 
 
-def load_pretrained_weights(model, pretrained_weights, checkpoint_key):
+def load_pretrained_weights(model, pretrained_weights, checkpoint_key, abort_if_missing=True):
     if os.path.isfile(pretrained_weights):
         state_dict = torch.load(pretrained_weights, map_location="cpu")
         if checkpoint_key is not None and checkpoint_key in state_dict:
-            print(f"Take key {checkpoint_key} in provided checkpoint dict")
+            print(f"Take key '{checkpoint_key}' in provided checkpoint dict")
             state_dict = state_dict[checkpoint_key]
-        for k in list(state_dict.keys()):
-            # retain only encoder up to before the embedding layer
-            if k.startswith('module.encoder') and not k.startswith('module.encoder.fc'):
-                # remove prefix
-                state_dict[k[len("module.encoder."):]] = state_dict[k]
-            # delete renamed or unused k
-            del state_dict[k]
-
+        # remove `module.` prefix
+        state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+        # remove `backbone.` prefix
+        state_dict = {k.replace("backbone.", ""): v for k, v in state_dict.items()}
         msg = model.load_state_dict(state_dict, strict=False)
-        assert set(msg.missing_keys) == {"fc.weight", "fc.bias"}
-
         print('Pretrained weights found at {} and loaded with msg: {}'.format(pretrained_weights, msg))
     else:
+        if abort_if_missing:
+            raise FileNotFoundError("=> no checkpoint found at '{}'".format(pretrained_weights))
         print("=> no checkpoint found at '{}'".format(pretrained_weights))
 
 
@@ -313,3 +311,60 @@ def bool_flag(s):
         return True
     else:
         raise argparse.ArgumentTypeError("invalid value for a boolean flag")
+
+
+def arg_dict(x):
+    """
+    Parse dictionary arguments from the command line.
+    Comma-separated string of key:value pairs.
+    example:
+        --arg zero_init_residual:True,patch_size:16
+    """
+    out = {}
+    if x is not None:
+        for item in x.split(','):
+            key, value = item.split(':')
+            out[key] = eval(value)
+    return out
+
+
+def get_params_groups(model):
+    regularized = []
+    not_regularized = []
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            continue
+        # we do not regularize biases nor Norm parameters
+        if name.endswith(".bias") or len(param.shape) == 1:
+            not_regularized.append(param)
+        else:
+            regularized.append(param)
+    return [{'params': regularized}, {'params': not_regularized, 'weight_decay': 0.}]
+
+
+def cosine_scheduler(base_value, final_value, epochs, niter_per_ep, warmup_epochs=0, start_warmup_value=0):
+    warmup_schedule = np.array([])
+    warmup_iters = warmup_epochs * niter_per_ep
+    if warmup_epochs > 0:
+        warmup_schedule = np.linspace(start_warmup_value, base_value, warmup_iters)
+
+    iters = np.arange(epochs * niter_per_ep - warmup_iters)
+    schedule = final_value + 0.5 * (base_value - final_value) * (1 + np.cos(np.pi * iters / len(iters)))
+
+    schedule = np.concatenate((warmup_schedule, schedule))
+    assert len(schedule) == epochs * niter_per_ep
+    return schedule
+
+
+def cancel_gradients_last_layer(epoch, model, freeze_last_layer):
+    if epoch >= freeze_last_layer:
+        return
+    for n, p in model.named_parameters():
+        if "last_layer" in n:
+            p.grad = None
+
+
+def print_args(args):
+    print("Parameters:")
+    for k, v in sorted(args.items()):
+        print("\t{}: {}".format(k, v))
