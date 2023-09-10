@@ -113,7 +113,7 @@ def make_dataset(
         return CIFAR100(root, download=False, train=train, transform=transform), 100
     elif dataset == 'Food101':
         split = "train" if train else "test"
-        return Food101(root, download=True, split=split, transform=transform), 101
+        return Food101(root, download=False, split=split, transform=transform), 101
     elif dataset == "Flowers102":
         split = "train" if train else "test"
         return Flowers102(root, download=False, split=split, transform=transform), 102
