@@ -142,6 +142,8 @@ def main(cfg):
 
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, cfg.epochs, eta_min=0)
 
+    fp16_scaler = torch.cuda.amp.GradScaler() if "vit" in cfg.arch else None
+
     log_dir = os.path.join(cfg.output_dir, "tensorboard")
     board = SummaryWriter(log_dir) if dist.is_main_process() else None
 
@@ -158,6 +160,7 @@ def main(cfg):
             model=model,
             linear_classifier=linear_classifier,
             optimizer=optimizer,
+            fp16_scaler=fp16_scaler,
         )
     else:
         # only classifier needs to be loaded
@@ -166,6 +169,7 @@ def main(cfg):
             run_variables=to_restore,
             linear_classifier=linear_classifier,
             optimizer=optimizer,
+            fp16_scaler=fp16_scaler,
         )
     start_epoch = to_restore["epoch"]
     best_acc = to_restore["best_acc"]
@@ -174,7 +178,7 @@ def main(cfg):
         train_loader.sampler.set_epoch(epoch)
 
         # train for one epoch
-        train_stats = train(train_loader, model, linear_classifier, criterion, optimizer, epoch, cfg, board)
+        train_stats = train(train_loader, model, linear_classifier, criterion, optimizer, epoch, cfg, board, fp16_scaler)
         log_stats = {**{f'train_{k}': v for k, v in train_stats.items()}, 'epoch': epoch}
 
         scheduler.step()
@@ -203,6 +207,7 @@ def main(cfg):
                 "optimizer": optimizer.state_dict(),
                 "linear_classifier": linear_classifier.state_dict(),
                 "best_acc": best_acc,
+                "fp16_scaler": fp16_scaler.state_dict(),
             }
             path = os.path.join(cfg.output_dir, checkpoint_name)
             torch.save(save_dict, path)
@@ -211,7 +216,7 @@ def main(cfg):
           "Top-1 test accuracy: {acc:.1f}".format(acc=best_acc))
 
 
-def train(loader, model, linear_classifier, criterion, optimizer, epoch, cfg, board):
+def train(loader, model, linear_classifier, criterion, optimizer, epoch, cfg, board, fp16_scaler):
     # switch to train mode
     linear_classifier.train()
     if cfg.finetune:
@@ -227,20 +232,25 @@ def train(loader, model, linear_classifier, criterion, optimizer, epoch, cfg, bo
         images = images.cuda(non_blocking=True)
         targets = targets.cuda(non_blocking=True)
 
-        # compute output
-        if cfg.finetune:
-            output = model(images)
-        else:
-            with torch.no_grad():
+        with torch.cuda.amp.autocast(fp16_scaler is not None):
+            if cfg.finetune:
                 output = model(images)
+            else:
+                with torch.no_grad():
+                    output = model(images)
 
-        output = linear_classifier(output)
-        loss = criterion(output, targets)
+            output = linear_classifier(output)
+            loss = criterion(output, targets)
 
         # compute gradient and do optimizer step
         optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+        if fp16_scaler:
+            fp16_scaler.scale(loss).backward()
+            fp16_scaler.step(optimizer)
+            fp16_scaler.update()
+        else:
+            loss.backward()
+            optimizer.step()
 
         # measure accuracy and record loss
         acc1, acc5 = utils.accuracy(output, targets, topk=(1, 5))
