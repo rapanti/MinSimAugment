@@ -229,7 +229,14 @@ def train(loader, model, linear_classifier, criterion, optimizer, epoch, cfg, bo
 
         # compute output
         if cfg.finetune:
-            output = model(images)
+            if "vit" in cfg.arch:
+                intermediate_output = model.get_intermediate_layers(images, cfg.n_last_blocks)
+                output = torch.cat([x[:, 0] for x in intermediate_output], dim=-1)
+                if cfg.avgpool:
+                    output = torch.cat((output.unsqueeze(-1), torch.mean(intermediate_output[-1][:, 1:], dim=1).unsqueeze(-1)), dim=-1)
+                    output = output.reshape(output.shape[0], -1)
+            else:
+                output = model(images)
         else:
             with torch.no_grad():
                 if "vit" in cfg.arch:
