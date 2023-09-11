@@ -92,6 +92,6 @@ if __name__ == "__main__":
     eval_knn_cfg.rank = cfg.rank
     eval_knn_cfg.world_size = cfg.world_size
     eval_knn_cfg.dist_url = cfg.dist_url
-    eval_knn_cfg.timeout = datetime.timedelta(seconds=1800*20)
+    eval_knn_cfg.timeout = 1800*20
 
     eval_knn.main(eval_knn_cfg)
