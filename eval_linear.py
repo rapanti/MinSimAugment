@@ -97,7 +97,6 @@ def main(cfg):
         sys.exit(1)
     model.cuda()
 
-
     # load weights to evaluate
     utils.load_pretrained_weights(model, cfg.pretrained, cfg.ckp_key)
     print(f"Model {cfg.arch} built.")
@@ -106,6 +105,9 @@ def main(cfg):
     linear_classifier = LinearClassifier(embed_dim, num_labels=cfg.num_labels)
     linear_classifier = linear_classifier.cuda()
     linear_classifier = nn.parallel.DistributedDataParallel(linear_classifier, device_ids=[cfg.gpu])
+
+    if "vit" in cfg.arch:
+        model = VitWrapper(model, cfg.n_last_blocks, cfg.avgpool)
 
     if cfg.finetune:
         for p in model.parameters():
@@ -118,8 +120,6 @@ def main(cfg):
             p.requires_grad = False
         model.eval()
         params_to_optimize = linear_classifier.parameters()
-
-
 
     # define loss function (criterion) and optimizer
     criterion = nn.CrossEntropyLoss().cuda()
@@ -229,24 +229,10 @@ def train(loader, model, linear_classifier, criterion, optimizer, epoch, cfg, bo
 
         # compute output
         if cfg.finetune:
-            if "vit" in cfg.arch:
-                intermediate_output = model.get_intermediate_layers(images, cfg.n_last_blocks)
-                output = torch.cat([x[:, 0] for x in intermediate_output], dim=-1)
-                if cfg.avgpool:
-                    output = torch.cat((output.unsqueeze(-1), torch.mean(intermediate_output[-1][:, 1:], dim=1).unsqueeze(-1)), dim=-1)
-                    output = output.reshape(output.shape[0], -1)
-            else:
-                output = model(images)
+            output = model(images)
         else:
             with torch.no_grad():
-                if "vit" in cfg.arch:
-                    intermediate_output = model.get_intermediate_layers(images, cfg.n_last_blocks)
-                    output = torch.cat([x[:, 0] for x in intermediate_output], dim=-1)
-                    if cfg.avgpool:
-                        output = torch.cat((output.unsqueeze(-1), torch.mean(intermediate_output[-1][:, 1:], dim=1).unsqueeze(-1)), dim=-1)
-                        output = output.reshape(output.shape[0], -1)
-                else:
-                    output = model(images)
+                output = model(images)
 
         output = linear_classifier(output)
         loss = criterion(output, targets)
@@ -289,19 +275,7 @@ def validate(loader, model, linear_classifier, criterion, cfg):
             images = images.cuda(non_blocking=True)
             target = target.cuda(non_blocking=True)
 
-            if cfg.finetune:
-                output = model(images)
-            else:
-                with torch.no_grad():
-                    if "vit" in cfg.arch:
-                        intermediate_output = model.get_intermediate_layers(images, cfg.n_last_blocks)
-                        output = torch.cat([x[:, 0] for x in intermediate_output], dim=-1)
-                        if cfg.avgpool:
-                            output = torch.cat((output.unsqueeze(-1), torch.mean(intermediate_output[-1][:, 1:], dim=1).unsqueeze(-1)), dim=-1)
-                            output = output.reshape(output.shape[0], -1)
-                    else:
-                        output = model(images)
-
+            output = model(images)
             output = linear_classifier(output)
             loss = criterion(output, target)
 
@@ -318,6 +292,22 @@ def validate(loader, model, linear_classifier, criterion, cfg):
               .format(top1=metric_logger.acc1, top5=metric_logger.acc5, losses=metric_logger.loss))
 
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+
+
+class VitWrapper(nn.Module):
+    def __init__(self, model, n_last_blocks, avgpool):
+        super().__init__()
+        self.model = model
+        self.n_last_blocks = n_last_blocks
+        self.avgpool = avgpool
+
+    def forward(self, x):
+        intermediate_output = self.model.get_intermediate_layers(x, self.n_last_blocks)
+        output = torch.cat([x[:, 0] for x in intermediate_output], dim=-1)
+        if self.avgpool:
+            output = torch.cat((output.unsqueeze(-1), torch.mean(intermediate_output[-1][:, 1:], dim=1).unsqueeze(-1)), dim=-1)
+            output = output.reshape(output.shape[0], -1)
+        return output
 
 
 class LinearClassifier(nn.Module):
