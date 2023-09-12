@@ -207,7 +207,7 @@ def main(cfg):
                 "optimizer": optimizer.state_dict(),
                 "linear_classifier": linear_classifier.state_dict(),
                 "best_acc": best_acc,
-                "fp16_scaler": fp16_scaler.state_dict(),
+                "fp16_scaler": fp16_scaler.state_dict() if fp16_scaler is not None else None,
             }
             path = os.path.join(cfg.output_dir, checkpoint_name)
             torch.save(save_dict, path)
