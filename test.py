@@ -23,7 +23,7 @@ if __name__ == '__main__':
 
     linear_cfg = get_linear_args_parser().parse_args()
     linear_cfg.epochs = 3
-    linear_cfg.batch_size = 256
+    linear_cfg.batch_size = 128
     linear_cfg.dataset = "test224"
     linear_cfg.pretrained_weights = "exp/checkpoint.pth"
     linear_cfg.output_dir = "exp"
@@ -33,7 +33,7 @@ if __name__ == '__main__':
     )
 
     knn_cfg = get_knn_args_parser().parse_args()
-    knn_cfg.batch_size = 256
+    knn_cfg.batch_size = 128
     knn_cfg.dataset = "test224"
     knn_cfg.pretrained_weights = "exp/checkpoint.pth"
     knn_cfg.output_dir = "exp"

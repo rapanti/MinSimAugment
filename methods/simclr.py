@@ -21,8 +21,8 @@ class SimCLR(nn.Module):
         self.projector = SimCLRProjectionHead(embed_dim, proj_hidden_dim, out_dim, num_layers, use_bn)
 
     def forward(self, x: Tensor) -> Tensor:
-        f = self.backbone(x).flatten(start_dim=1)
-        z = self.projector(f)
+        h = self.backbone(x).flatten(start_dim=1)
+        z = self.projector(h)
         return z
 
 

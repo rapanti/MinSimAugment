@@ -22,9 +22,8 @@ from methods import SimCLR
 from transforms import SimCLRTransform, custom_collate
 
 
-_GRAD_ACCUM_STEPS = 1
-_LOG_FREQ = 0
-# _LOG_ADV_METRIC = 0
+GRAD_ACCUM_STEPS = 1
+LOG_FREQ = 0
 
 
 def main(
@@ -55,9 +54,9 @@ def main(
     print("Running pretraining ...")
     utils.print_args(locals())
 
-    global _LOG_FREQ, _GRAD_ACCUM_STEPS  # , _LOG_ADV_METRIC
-    _GRAD_ACCUM_STEPS = grad_accum_steps
-    _LOG_FREQ = log_freq
+    global LOG_FREQ, GRAD_ACCUM_STEPS  # , _LOG_ADV_METRIC
+    GRAD_ACCUM_STEPS = grad_accum_steps
+    LOG_FREQ = log_freq
     # _LOG_ADV_METRIC = log_adv_metric
 
     if arch_kwargs is None:
@@ -84,7 +83,7 @@ def main(
     print(f"SimCLR network created with {arch} backbone.")
 
     # ============ preparing data ... ============
-    batch_size_per_gpu = batch_size // dist.world_size() // _GRAD_ACCUM_STEPS
+    batch_size_per_gpu = batch_size // dist.world_size() // GRAD_ACCUM_STEPS
     train_dataset, _ = data.make_dataset(data_path, dataset, True, SimCLRTransform(num_views=2))
     data_loader = DataLoader(
         train_dataset,
@@ -98,11 +97,7 @@ def main(
     print(f"Data loaded with {len(train_dataset)} train images.")
 
     # ============ building loss ... ============
-    nt_xent_loss = losses.NTXentLoss(
-        batch_size=batch_size_per_gpu,
-        temperature=0.1,
-        world_size=dist.world_size(),
-    )
+    ntx_loss = losses.NTXentLoss(temperature=0.1, gather_distributed=dist.is_enabled())
 
     # ============ building optimizer ... ============
     if sqrt_lr:
@@ -151,7 +146,7 @@ def main(
         # ============ training one epoch ... ============
         start = time.time()
         train_stats, metrics = \
-            train_one_epoch(model, nt_xent_loss, data_loader, optimizer, lr_schedule, scaler, epoch, epochs)
+            train_one_epoch(model, ntx_loss, data_loader, optimizer, lr_schedule, scaler, epoch, epochs)
         total_time += int(time.time() - start)
 
         # ============ writing logs ... ============
@@ -191,43 +186,46 @@ def train_one_epoch(
     metrics["epoch"] = epoch
     metric_logger = utils.MetricLogger(delimiter=" ")
     header = 'Epoch: [{}/{}]'.format(epoch, epochs)
+
+    total_loss = torch.zeros(1, device=model.device)
     for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
         it = len(data_loader) * epoch + it  # global training iteration
 
         for i, param_group in enumerate(optimizer.param_groups):
             param_group["lr"] = lr_schedule[it]
 
-        images, params, targets = batch
+        images, _, _ = batch
         images = [img.cuda(non_blocking=True) for img in images]
 
         with torch.cuda.amp.autocast(scaler is not None):
             out = model(torch.cat(images))
             loss = criterion(*out.chunk(len(images)))
 
+        loss /= GRAD_ACCUM_STEPS
         loss.backward() if scaler is None else scaler.scale(loss).backward()
 
-        if not (it + 1) % _GRAD_ACCUM_STEPS:
-            if scaler is None:
-                optimizer.step()
-            else:
+        total_loss += loss.item()
+
+        if not (it + 1) % GRAD_ACCUM_STEPS:
+            if scaler:
                 scaler.step(optimizer)
                 scaler.update()
+            else:
+                optimizer.step()
             optimizer.zero_grad()
 
             # logging
             torch.cuda.synchronize()
-            metric_logger.update(loss=loss.item())
+            metric_logger.update(loss=total_loss.item())
             metric_logger.update(lr=optimizer.param_groups[0]["lr"])
 
-            grad_step = (it + 1) // _GRAD_ACCUM_STEPS
-            if not grad_step % _LOG_FREQ:
+            step = (it + 1) // GRAD_ACCUM_STEPS
+            if not step % LOG_FREQ:
                 metrics["step"].append(it)
-                metrics["loss"].append(loss.item())
+                metrics["loss"].append(total_loss.item())
                 metrics["lr"].append(optimizer.param_groups[0]["lr"])
-                # if _LOG_ADV_METRIC:
-                #     if params:
-                #         params = [p.tolist() for p in params]
-                #         metrics["params"].append(params)
+
+            total_loss.zero_()
 
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)

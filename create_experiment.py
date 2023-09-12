@@ -112,7 +112,7 @@ if __name__ == "__main__":
         f"#SBATCH --gres=gpu:{slurm_args.gpus}",
         f"#SBATCH -J {exp_name}",
         f"#SBATCH -o slurm/%A.%a.%N.txt",
-        f"#SBATCH --array 0-{slurm_args.array}%1\n" if slurm_args.array > 0 else '',
+        f"#SBATCH -a 0-{slurm_args.array}%1\n" if slurm_args.array > 0 else '',
         'echo "Workingdir: $PWD"',
         'echo "Started at $(date)"',
         'echo "Running job $SLURM_JOB_NAME with given JID $SLURM_JOB_ID on queue $SLURM_JOB_PARTITION"\n',
@@ -123,9 +123,10 @@ if __name__ == "__main__":
         "torchrun",
         f"--nnodes=1",
         f"--nproc_per_node={slurm_args.gpus}",
-        f"--rdzv-endpoint=localhost:$RANDOM",
+        f"--rdzv-endpoint=localhost:0",
         f"--rdzv-backend=c10d",
         f"--rdzv-id=$SLURM_JOB_ID",
+        f"--max-restart=3",
         f"code/main.py"
     ]
 
