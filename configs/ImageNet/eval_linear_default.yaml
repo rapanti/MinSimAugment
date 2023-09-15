@@ -7,3 +7,7 @@ lr: 0.3
 momentum: 0.9
 resize_size: 256
 weight_decay: 1e-6
+num_workers: 8
+pretrained: checkpoint.pth
+logger_freq: 50
+val_freq: 1
