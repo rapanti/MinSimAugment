@@ -150,8 +150,8 @@ def main(cfg):
     # Optionally resume from a checkpoint
     to_restore = {"epoch": 0, "best_acc": 0.}
 
-    checkpoint_name = "checkpoint.pth.tar" if cfg.dataset == "ImageNet" else f"checkpoint_{cfg.dataset}.pth.tar"
-
+    # checkpoint_name = "checkpoint.pth.tar" if cfg.dataset == "ImageNet" else f"checkpoint_{cfg.dataset}.pth.tar"
+    checkpoint_name = f"{'fine' if cfg.finetune else 'eval'}_checkpoint_{str(cfg.dataset).lower()}.pth"
     if cfg.finetune:
         # load classifier and backbone
         utils.restart_from_checkpoint(
