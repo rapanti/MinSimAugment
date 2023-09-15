@@ -212,6 +212,9 @@ def main(cfg):
             path = os.path.join(cfg.output_dir, checkpoint_name)
             torch.save(save_dict, path)
 
+    if dist.is_main_process():
+        with (Path(cfg.output_dir) / "results.txt").open("a") as f:
+            f.write(f"{'fine' if cfg.finetune else 'eval'} of {cfg.dataset}:\t {best_acc}" + "\n")
     print("Training of the supervised linear classifier on frozen features completed.\n"
           "Top-1 test accuracy: {acc:.1f}".format(acc=best_acc))
 
