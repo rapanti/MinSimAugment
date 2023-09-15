@@ -92,7 +92,7 @@ def main(cfg):
     else:
         optim_params = model.parameters()
 
-    if cfg.optimizer == "SGD":
+    if cfg.optimizer == "sgd":
         optimizer = torch.optim.SGD(optim_params, init_lr, momentum=cfg.momentum, weight_decay=cfg.weight_decay)
     elif cfg.optimizer == "adamw":
         optimizer = torch.optim.AdamW(optim_params, init_lr, weight_decay=cfg.weight_decay)  # to use with ViTs
