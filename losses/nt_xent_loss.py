@@ -18,9 +18,9 @@ class NTXentLoss(torch.nn.Module):
         z0 = nn.functional.normalize(z0, p=2, dim=1)
         z1 = nn.functional.normalize(z1, p=2, dim=1)
 
-        if self.gather_distributed and dist.world_size() > 1:
-            z0 = torch.cat(gather(z0), dim=0)
-            z1 = torch.cat(gather(z1), dim=0)
+        if self.gather_distributed and dist.get_world_size() > 1:
+            z0 = gather(z0)
+            z1 = gather(z1)
 
         z = torch.cat((z0, z1), dim=0)
         sim = nnf.cosine_similarity(z.unsqueeze(1), z.unsqueeze(0), dim=-1) / self.temperature

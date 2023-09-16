@@ -1,7 +1,7 @@
 import torch.nn as nn
 from torch import Tensor
 
-from methods.utils import get_embed_dim
+from methods.utils import prepare_backbone
 
 
 class SimCLR(nn.Module):
@@ -16,9 +16,9 @@ class SimCLR(nn.Module):
     ):
         super().__init__(*args, **kwargs)
         self.backbone = backbone
-        embed_dim = get_embed_dim(backbone)
+        feat_dim = prepare_backbone(backbone)
 
-        self.projector = SimCLRProjectionHead(embed_dim, proj_hidden_dim, out_dim, num_layers, use_bn)
+        self.projector = SimCLRProjectionHead(feat_dim, proj_hidden_dim, out_dim, num_layers, use_bn)
 
     def forward(self, x: Tensor) -> Tensor:
         h = self.backbone(x).flatten(start_dim=1)

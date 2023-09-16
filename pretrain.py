@@ -24,6 +24,7 @@ from transforms import SimCLRTransform, custom_collate
 
 GRAD_ACCUM_STEPS = 1
 LOG_FREQ = 0
+MAX_EPOCHS = -1
 
 
 def main(
@@ -54,10 +55,10 @@ def main(
     print("Running pretraining ...")
     utils.print_args(locals())
 
-    global LOG_FREQ, GRAD_ACCUM_STEPS  # , _LOG_ADV_METRIC
+    global LOG_FREQ, GRAD_ACCUM_STEPS, MAX_EPOCHS
     GRAD_ACCUM_STEPS = grad_accum_steps
     LOG_FREQ = log_freq
-    # _LOG_ADV_METRIC = log_adv_metric
+    MAX_EPOCHS = epochs
 
     if arch_kwargs is None:
         arch_kwargs = {}
@@ -83,7 +84,7 @@ def main(
     print(f"SimCLR network created with {arch} backbone.")
 
     # ============ preparing data ... ============
-    batch_size_per_gpu = batch_size // dist.world_size() // GRAD_ACCUM_STEPS
+    batch_size_per_gpu = batch_size // dist.get_world_size() // GRAD_ACCUM_STEPS
     train_dataset, _ = data.make_dataset(data_path, dataset, True, SimCLRTransform(num_views=2))
     data_loader = DataLoader(
         train_dataset,
@@ -101,7 +102,7 @@ def main(
 
     # ============ building optimizer ... ============
     if sqrt_lr:
-        init_lr = lr * math.sqrt(batch_size / 256)  # square root scaling rule
+        init_lr = lr * math.sqrt(batch_size)  # square root scaling rule
     else:
         init_lr = lr * batch_size / 256.  # linear scaling rule
     optimizer = optimizers.configure_optimizer(
@@ -123,6 +124,9 @@ def main(
 
     # Gradient scaler for mixed precision training
     scaler = torch.cuda.amp.GradScaler() if use_fp16 else None
+
+    # # ============ preparing logging ... ============
+    logger = utils.CSVLogger(os.path.join(output_dir, "pretrain.csv"))
 
     print("Preparation done!")
 
@@ -146,7 +150,7 @@ def main(
         # ============ training one epoch ... ============
         start = time.time()
         train_stats, metrics = \
-            train_one_epoch(model, ntx_loss, data_loader, optimizer, lr_schedule, scaler, epoch, epochs)
+            train_one_epoch(model, ntx_loss, data_loader, optimizer, lr_schedule, scaler, epoch, logger)
         total_time += int(time.time() - start)
 
         # ============ writing logs ... ============
@@ -160,16 +164,18 @@ def main(
         utils.save_on_master(save_dict, os.path.join(output_dir, 'checkpoint.pth'))
         if save_ckp_freq and epoch and epoch % save_ckp_freq == 0:
             utils.save_on_master(save_dict, os.path.join(output_dir, f'checkpoint{epoch:04}.pth'))
+
         log_stats = {**{f'train_{k}': v for k, v in train_stats.items()}, 'epoch': epoch}
         if dist.is_main_process():
             with (Path(output_dir) / "pretrain.log").open("a") as f:
                 f.write(json.dumps(log_stats) + "\n")
-        if dist.is_main_process():
             with (Path(output_dir) / "metrics.json").open("a") as f:
                 f.write(json.dumps(metrics) + "\n")
+        logger.flush()
 
+    logger.close()
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
-    print('Training time {}'.format(total_time_str))
+    print(f"Pretraining finished. Total training time: {total_time_str}\n")
 
 
 def train_one_epoch(
@@ -180,15 +186,15 @@ def train_one_epoch(
         lr_schedule,
         scaler,
         epoch,
-        epochs,
+        logger,
 ):
     metrics = defaultdict(list)
     metrics["epoch"] = epoch
     metric_logger = utils.MetricLogger(delimiter=" ")
-    header = 'Epoch: [{}/{}]'.format(epoch, epochs)
+    header = 'Epoch: [{}/{}]'.format(epoch, MAX_EPOCHS)
 
     total_loss = torch.zeros(1, device=model.device)
-    for it, batch in enumerate(metric_logger.log_every(data_loader, 10, header)):
+    for it, batch in enumerate(metric_logger.log_every(data_loader, 100, header)):
         it = len(data_loader) * epoch + it  # global training iteration
 
         for i, param_group in enumerate(optimizer.param_groups):
@@ -200,10 +206,9 @@ def train_one_epoch(
         with torch.cuda.amp.autocast(scaler is not None):
             out = model(torch.cat(images))
             loss = criterion(*out.chunk(len(images)))
+            loss /= GRAD_ACCUM_STEPS
 
-        loss /= GRAD_ACCUM_STEPS
         loss.backward() if scaler is None else scaler.scale(loss).backward()
-
         total_loss += loss.item()
 
         if not (it + 1) % GRAD_ACCUM_STEPS:
@@ -220,10 +225,12 @@ def train_one_epoch(
             metric_logger.update(lr=optimizer.param_groups[0]["lr"])
 
             step = (it + 1) // GRAD_ACCUM_STEPS
+            logger.log("loss", total_loss.item(), step)
+            logger.log("lr", optimizer.param_groups[0]["lr"], step)
             if not step % LOG_FREQ:
                 metrics["step"].append(it)
                 metrics["loss"].append(total_loss.item())
-                metrics["lr"].append(optimizer.param_groups[0]["lr"])
+                # metrics["params"].append(params.tolist())
 
             total_loss.zero_()
 
@@ -267,7 +274,7 @@ if __name__ == "__main__":
     parser = get_pretrain_args_parser()
     args = parser.parse_args()
 
-    local_rank, rank, world_size = dist.ddp_setup()
+    local_rank, rank, world_size = dist.setup()
     main(
         **vars(args),
         gpu_id=local_rank

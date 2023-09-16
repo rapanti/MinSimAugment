@@ -10,6 +10,7 @@ import torch
 import torch.nn as nn
 
 import distributed as dist
+from utils.csv_logger import CSVLogger
 
 
 def fix_random_seeds(seed=0):
@@ -160,7 +161,7 @@ def reduce_dict(input_dict, average=True):
     have the averaged results. Returns a dict with the same fields as
     input_dict, after reduction.
     """
-    world_size = dist.world_size()
+    world_size = dist.get_world_size()
     if world_size < 2:
         return input_dict
     with torch.no_grad():

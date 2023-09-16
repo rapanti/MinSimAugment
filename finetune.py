@@ -216,7 +216,7 @@ if __name__ == "__main__":
     parser = get_finetune_args_parser()
     args = parser.parse_args()
 
-    local_rank, rank, world_size = dist.ddp_setup()
+    local_rank, rank, world_size = dist.setup()
 
     finetune(
         **vars(args),

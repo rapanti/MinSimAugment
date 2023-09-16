@@ -5,12 +5,15 @@ import torch
 import torch.distributed as dist
 
 
-def ddp_setup() -> (int, int, int):
+def setup() -> (int, int, int):
+    """
+    Initialize the distributed environment.
+    """
     # launched with torchrun
     if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
+        _local_rank = int(os.environ['LOCAL_RANK'])
         _rank = int(os.environ["RANK"])
         _world_size = int(os.environ['WORLD_SIZE'])
-        _local_rank = int(os.environ['LOCAL_RANK'])
         dist.init_process_group(
             backend="nccl" if dist.is_nccl_available() else "gloo",
             rank=_local_rank,
@@ -27,7 +30,7 @@ def ddp_setup() -> (int, int, int):
     # we manually add MASTER_ADDR and MASTER_PORT to env variables
     elif torch.cuda.is_available():
         print('Will run the code on one GPU.')
-        _rank, _local_rank, _world_size = 0, 0, 1
+        _local_rank, _rank, _world_size = 0, 0, 1
         os.environ['MASTER_ADDR'] = '127.0.0.1'
         os.environ['MASTER_PORT'] = '29500'
         dist.init_process_group(
@@ -48,27 +51,25 @@ def is_enabled() -> bool:
     return dist.is_available() and dist.is_initialized()
 
 
-def world_size() -> int:
+def get_world_size() -> int:
     """Returns the current world size (number of distributed processes)."""
-    if not is_enabled():
-        return 1
-    return dist.get_world_size()
+    return dist.get_world_size() if is_enabled() else 1
 
 
-def rank() -> int:
+def get_rank() -> int:
     """Returns the rank of the current process within the global process group."""
     return dist.get_rank() if is_enabled() else 0
 
 
 def is_main_process() -> bool:
     """Returns True if the current process is the main one."""
-    return rank() == 0
+    return get_rank() == 0 if is_enabled() else True
 
 
 def rank_zero_only(fn):
     """Decorator that only runs the function on the process with rank 0."""
     def wrapped(*args, **kwargs):
-        if rank() == 0:
+        if get_rank() == 0:
             return fn(*args, **kwargs)
 
     return wrapped

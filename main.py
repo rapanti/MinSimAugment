@@ -9,7 +9,7 @@ from knn import eval_knn
 
 
 if __name__ == '__main__':
-    gpu_id, rank, world_size = dist.ddp_setup()
+    gpu_id, rank, world_size = dist.setup()
     print("git:\n  {}\n".format(utils.get_sha()))
 
     pretrain_cfg = OmegaConf.load('pretrain.yaml')

@@ -9,25 +9,26 @@ class GatherLayer(torch.autograd.Function):
 
     This code was taken and adapted from here:
     https://github.com/Spijkervet/SimCLR
-
-    Adapted from lightly.
     """
 
     @staticmethod
-    def forward(ctx, input: torch.Tensor) -> Tuple[torch.Tensor, ...]:
-        ctx.save_for_backward(input)
-        output = [torch.empty_like(input) for _ in range(dist.get_world_size())]
-        dist.all_gather(output, input)
+    def forward(ctx, x: torch.Tensor) -> Tuple[torch.Tensor, ...]:
+        if dist.is_available() and dist.is_initialized():
+            output = [torch.empty_like(x) for _ in range(dist.get_world_size())]
+            dist.all_gather(output, x)
+        else:
+            output = [x]
         return tuple(output)
 
     @staticmethod
     def backward(ctx, *grads: torch.Tensor) -> torch.Tensor:
-        (input,) = ctx.saved_tensors
-        grad_out = torch.empty_like(input)
-        grad_out[:] = grads[dist.get_rank()]
+        if dist.is_available() and dist.is_initialized():
+            grad_out = grads[dist.get_rank()]
+        else:
+            grad_out = grads[0]
         return grad_out
 
 
-def gather(input: torch.Tensor) -> Tuple[torch.Tensor]:
+def gather(x: torch.Tensor) -> torch.Tensor:
     """Gathers this tensor from all processes. Supports backprop."""
-    return GatherLayer.apply(input)
+    return torch.cat(GatherLayer.apply(x), dim=0)

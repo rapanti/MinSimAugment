@@ -39,7 +39,7 @@ def eval_linear(
     print("Running Linear evaluation...")
     utils.print_args(locals())
 
-    batch_size_per_gpu = batch_size // dist.world_size()
+    batch_size_per_gpu = batch_size // dist.get_world_size()
     train_transform = transforms.EvalTrainTransform()
     train_dataset, num_classes = data.make_dataset(data_path, dataset, True, train_transform)
     train_loader = DataLoader(
@@ -216,7 +216,7 @@ if __name__ == "__main__":
     parser = get_linear_args_parser()
     args = parser.parse_args()
 
-    local_rank, rank, world_size = dist.ddp_setup()
+    local_rank, rank, world_size = dist.setup()
 
     eval_linear(
         **vars(args),

@@ -7,7 +7,7 @@ from knn import eval_knn, get_knn_args_parser
 
 
 if __name__ == '__main__':
-    gpu_id, rank, world_size = dist.ddp_setup()
+    gpu_id, rank, world_size = dist.setup()
     cudnn.benchmark = True
 
     pretrain_cfg = get_linear_args_parser().parse_args()

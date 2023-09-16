@@ -12,9 +12,10 @@ import torchvision.models as torch_models
 from torch.utils.data import DataLoader, DistributedSampler
 
 import data
+import distributed as dist
 import transforms
 import utils
-from distributed import ddp_setup, is_main_process
+from losses.utils import gather
 
 
 def eval_knn(
@@ -84,8 +85,9 @@ def eval_knn(
     train_features, train_labels = extract_features(model, train_loader)
     print("Extracting features for val set...")
     test_features, test_labels = extract_features(model, val_loader)
+    print("Features are ready!\nStart the k-NN classification.")
 
-    if dump_features and is_main_process():
+    if dump_features and dist.is_main_process():
         print("Dumping features...")
         torch.save(train_features, Path(output_dir) / "train_features.pth")
         torch.save(train_labels, Path(output_dir) / "train_labels.pth")
@@ -93,11 +95,13 @@ def eval_knn(
         torch.save(test_labels, Path(output_dir) / "test_labels.pth")
         print("Features are dumped!")
 
-    print("Features are ready!\nStart the k-NN classification.")
-    if not use_cuda:
+    if use_cuda:
+        train_features, train_labels = train_features.cuda(), train_labels.cuda()
+        test_features, test_labels = test_features.cuda(), test_labels.cuda()
+    else:
         torch_dist.destroy_process_group()  # destroy default process group to prevent NCCL timeout
     _out = []
-    if is_main_process():
+    if dist.is_main_process():
         for k in nb_knn:
             top1, top5 = knn_classifier(train_features, train_labels, test_features, test_labels, k, temperature)
             _out.append({"k": k, "top1": top1, "top5": top5})
@@ -114,24 +118,20 @@ def extract_features(model, data_loader):
     metric_logger = utils.MetricLogger(delimiter=" ")
     features = []
     labels = []
-    for samples, index in metric_logger.log_every(data_loader, 10):
+    for samples, index in metric_logger.log_every(data_loader, 100):
         samples = samples.cuda(non_blocking=True)
         index = index.cuda(non_blocking=True)
 
         feats = model(samples)
         feats = nnf.normalize(feats, dim=1)
+
+        feats = gather(feats)
+        index = gather(index)
         features.append(feats.cpu())
         labels.append(index.cpu())
 
-    features = torch.cat(features, dim=0)
-    all_features = [torch.empty_like(features) for _ in range(torch_dist.get_world_size())]
-    torch_dist.all_gather(all_features, features)
-    all_features = torch.cat(all_features, dim=0)
-
-    labels = torch.cat(labels, dim=0)
-    all_labels = [torch.empty_like(labels) for _ in range(torch_dist.get_world_size())]
-    torch_dist.all_gather(all_labels, labels)
-    all_labels = torch.cat(all_labels, dim=0)
+    all_features = torch.cat(features, dim=0)
+    all_labels = torch.cat(labels, dim=0)
 
     return all_features, all_labels
 
@@ -199,6 +199,6 @@ if __name__ == "__main__":
     parser = get_knn_args_parser()
     args = parser.parse_args()
 
-    local_rank, rank, world_size = ddp_setup()
+    local_rank, rank, world_size = dist.setup()
 
     eval_knn(**vars(args))
