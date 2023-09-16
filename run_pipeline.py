@@ -1,5 +1,5 @@
 from omegaconf import OmegaConf
-import eval_linear
+import eval_linear, eval_knn
 import pretrain
 import utils
 
@@ -24,6 +24,17 @@ if __name__ == "__main__":
     eval_linear_cfg.world_size = cfg.world_size
     eval_linear_cfg.dist_url = cfg.dist_url
     eval_linear.main(eval_linear_cfg)
+
+    print('STARTING k-NN EVALUATION')
+    eval_knn_cfg = OmegaConf.load("eval_knn.yaml")
+    # copy dist parameters
+    eval_knn_cfg.gpu = cfg.gpu
+    eval_knn_cfg.rank = cfg.rank
+    eval_knn_cfg.world_size = cfg.world_size
+    eval_knn_cfg.dist_url = cfg.dist_url
+    eval_knn_cfg.timeout = 1800*20
+
+    eval_knn.main(eval_knn_cfg)
 
     print('*************STARTING LINEAR EVALUATION: CIFAR10*************')
     eval_linear_cfg.dataset = "CIFAR10"
