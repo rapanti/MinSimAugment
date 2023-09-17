@@ -14,15 +14,15 @@ class NTXentLoss(torch.nn.Module):
         self.temperature = temperature
         self.gather_distributed = gather_distributed
 
-    def forward(self, z0: Tensor, z1: Tensor, reduction="mean") -> Tensor:
-        z0 = nn.functional.normalize(z0, p=2, dim=1)
+    def forward(self, z1: Tensor, z2: Tensor, reduction="mean") -> Tensor:
         z1 = nn.functional.normalize(z1, p=2, dim=1)
+        z2 = nn.functional.normalize(z2, p=2, dim=1)
 
         if self.gather_distributed and dist.get_world_size() > 1:
-            z0 = gather(z0)
             z1 = gather(z1)
+            z2 = gather(z2)
 
-        z = torch.cat((z0, z1), dim=0)
+        z = torch.cat((z1, z2), dim=0)
         sim = nnf.cosine_similarity(z.unsqueeze(1), z.unsqueeze(0), dim=-1) / self.temperature
 
         self_mask = torch.eye(sim.size(0), dtype=torch.bool, device=sim.device)
@@ -36,3 +36,9 @@ class NTXentLoss(torch.nn.Module):
         logits = torch.cat((positive_samples, negative_samples), dim=1)
 
         return nnf.cross_entropy(logits, labels, reduction=reduction)
+
+    def acs_fwd(self, z1: Tensor, z2: Tensor, reduction="none") -> Tensor:
+        loss = self(z1, z2, reduction=reduction)
+        loss = loss[:loss.size(0)//2] + loss[loss.size(0)//2:]
+        out = loss.chunk(loss.size(0) // z1.size(0))
+        return out[dist.get_rank()]

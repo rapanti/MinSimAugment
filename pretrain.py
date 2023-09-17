@@ -18,6 +18,7 @@ import losses
 # import models.vision_transformer as vits
 import optimizers
 import utils
+from acs import adversarial_crop_selection
 from methods import SimCLR
 from transforms import SimCLRTransform, custom_collate
 
@@ -33,7 +34,7 @@ def main(
         proj_hidden_dim: int = 2048,
         out_dim: int = 128,
         use_bn_in_head: bool = True,
-        optim: str = "sgd",
+        optim: str = "lars",
         lr: float = 0.3,
         sqrt_lr: bool = False,
         batch_size: int = 4096,
@@ -41,6 +42,8 @@ def main(
         weight_decay: float = 1e-4,
         epochs: int = 100,
         warmup_epochs: int = 10,
+        use_acs: bool = False,
+        num_crops: int = 2,
         use_fp16: bool = True,
         num_workers: int = 8,
         data_path: str = "path/to/dataset",
@@ -85,7 +88,7 @@ def main(
 
     # ============ preparing data ... ============
     batch_size_per_gpu = batch_size // dist.get_world_size() // GRAD_ACCUM_STEPS
-    train_dataset, _ = data.make_dataset(data_path, dataset, True, SimCLRTransform(num_views=2))
+    train_dataset, _ = data.make_dataset(data_path, dataset, True, SimCLRTransform(num_views=num_crops))
     data_loader = DataLoader(
         train_dataset,
         batch_size=batch_size_per_gpu,
@@ -150,7 +153,7 @@ def main(
         # ============ training one epoch ... ============
         start = time.time()
         train_stats, metrics = \
-            train_one_epoch(model, ntx_loss, data_loader, optimizer, lr_schedule, scaler, epoch, logger)
+            train_one_epoch(model, ntx_loss, data_loader, optimizer, lr_schedule, scaler, epoch, logger, use_acs)
         total_time += int(time.time() - start)
 
         # ============ writing logs ... ============
@@ -187,29 +190,33 @@ def train_one_epoch(
         scaler,
         epoch,
         logger,
+        use_acs,
 ):
     metrics = defaultdict(list)
     metrics["epoch"] = epoch
     metric_logger = utils.MetricLogger(delimiter=" ")
     header = 'Epoch: [{}/{}]'.format(epoch, MAX_EPOCHS)
 
-    total_loss = torch.zeros(1, device=model.device)
     for it, batch in enumerate(metric_logger.log_every(data_loader, 100, header)):
         it = len(data_loader) * epoch + it  # global training iteration
 
-        for i, param_group in enumerate(optimizer.param_groups):
+        for i, param_group in enumerate(optimizer.param_groups):  # adjust learning rate
             param_group["lr"] = lr_schedule[it]
 
-        images, _, _ = batch
+        images, params, _ = batch
         images = [img.cuda(non_blocking=True) for img in images]
 
+        # adversarial crop selection
+        if use_acs:
+            images, selection, _ = adversarial_crop_selection(images, model, criterion)
+
+        # regular training
         with torch.cuda.amp.autocast(scaler is not None):
-            out = model(torch.cat(images))
-            loss = criterion(*out.chunk(len(images)))
+            z1, z2 = model(torch.cat(images)).chunk(len(images))
+            loss = criterion(z1, z2)
             loss /= GRAD_ACCUM_STEPS
 
         loss.backward() if scaler is None else scaler.scale(loss).backward()
-        total_loss += loss.item()
 
         if not (it + 1) % GRAD_ACCUM_STEPS:
             if scaler:
@@ -221,18 +228,15 @@ def train_one_epoch(
 
             # logging
             torch.cuda.synchronize()
-            metric_logger.update(loss=total_loss.item())
+            metric_logger.update(loss=loss.item() * GRAD_ACCUM_STEPS)
             metric_logger.update(lr=optimizer.param_groups[0]["lr"])
 
             step = (it + 1) // GRAD_ACCUM_STEPS
-            logger.log("loss", total_loss.item(), step)
+            logger.log("loss", loss.item(), step)
             logger.log("lr", optimizer.param_groups[0]["lr"], step)
             if not step % LOG_FREQ:
                 metrics["step"].append(it)
-                metrics["loss"].append(total_loss.item())
                 # metrics["params"].append(params.tolist())
-
-            total_loss.zero_()
 
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
@@ -259,6 +263,9 @@ def get_pretrain_args_parser():
     p.add_argument("--warmup-epochs", default=10, type=int, help="number of warmup epochs")
     p.add_argument("--grad-accum-steps", default=1, type=int, help="gradient accumulation steps")
     p.add_argument("--use-fp16", default=True, type=utils.bool_flag, help="use mixed precision training")
+    # ACS parameters
+    p.add_argument("--use-acs", default=False, type=utils.bool_flag, help="whether to use adversarial crop selection")
+    p.add_argument("--num_crops", default=2, type=int, help="number of crops")
     # Misc
     p.add_argument("--dataset", default="imagenet", type=str, help="dataset name")
     p.add_argument("--data-path", default=None, type=str, help="path to data")
