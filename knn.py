@@ -5,17 +5,17 @@ from pathlib import Path
 from typing import Optional
 
 import torch
-import torch.distributed as torch_dist
+import torch.distributed
 import torch.nn as nn
 import torch.nn.functional as nnf
 import torchvision.models as torch_models
 from torch.utils.data import DataLoader, DistributedSampler
+from torchvision import datasets
 
-import data
 import distributed as dist
+import models.vision_transformer as vits
 import transforms
 import utils
-from losses.utils import gather
 
 
 def eval_knn(
@@ -40,75 +40,86 @@ def eval_knn(
         print("KNN evaluation has been done before. Skipping...")
         return
 
-    train_transform = transforms.EvalTrainTransform()
-    train_dataset, num_classes = data.make_dataset(data_path, dataset, True, train_transform)
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=batch_size,
-        num_workers=num_workers,
-        pin_memory=True,
-        sampler=DistributedSampler(train_dataset),
-        drop_last=False,
-    )
-
-    val_transform = transforms.EvalValTransform()
-    val_dataset, _ = data.make_dataset(data_path, dataset, False, val_transform)
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=batch_size,
-        num_workers=num_workers,
-        pin_memory=True,
-        drop_last=False,
-    )
-    print(f"Data loaded with {len(train_dataset)} train and {len(val_dataset)} val images.")
-
-    if arch_kwargs is None:
-        arch_kwargs = {}
-
-    if arch in torch_models.__dict__.keys():  # torchvision models
-        model = torch_models.__dict__[arch](**arch_kwargs)
-        model.fc = nn.Identity()
-    # elif arch in vits.__dict__.keys():  # vision transformer models
-    #     model = vits.__dict__[arch](**arch_kwargs)
-    #     embed_dim = model.embed_dim * (n_last_blocks + int(avgpool_patchtokens))
-    #     model.fc = nn.Identity()
+    if os.path.isfile(os.path.join(output_dir, "train_features.pth")):
+        print("Loading saved features...")
+        train_features = torch.load(Path(output_dir) / "train_features.pth", map_location="cpu")
+        train_labels = torch.load(Path(output_dir) / "train_labels.pth", map_location="cpu")
+        test_features = torch.load(Path(output_dir) / "test_features.pth", map_location="cpu")
+        test_labels = torch.load(Path(output_dir) / "test_labels.pth", map_location="cpu")
+        print("Features ready!")
     else:
-        raise NotImplementedError(f"Architecture {arch} not supported")
+        transform = transforms.EvalValTransform()
+        train_dataset = ReturnIndexDataset(os.path.join(args.data_path, "train"), transform=transform)
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            pin_memory=True,
+            sampler=DistributedSampler(train_dataset, shuffle=False),
+            drop_last=False,
+        )
 
-    model.cuda()
-    utils.load_pretrained_weights(model, pretrained_weights, ckp_key)
-    model.eval()
-    print(f"Model {arch} built.")
+        val_dataset = ReturnIndexDataset(os.path.join(args.data_path, "val"), transform=transform)
+        val_loader = DataLoader(
+            val_dataset,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            pin_memory=True,
+            drop_last=False,
+        )
+        print(f"Data loaded with {len(train_dataset)} train and {len(val_dataset)} val images.")
 
-    # ============ extract features ... ============
-    print("Extracting features for train set...")
-    train_features, train_labels = extract_features(model, train_loader)
-    print("Extracting features for val set...")
-    test_features, test_labels = extract_features(model, val_loader)
-    print("Features are ready!\nStart the k-NN classification.")
+        if arch_kwargs is None:
+            arch_kwargs = {}
 
-    if dump_features and dist.is_main_process():
-        print("Dumping features...")
-        torch.save(train_features, Path(output_dir) / "train_features.pth")
-        torch.save(train_labels, Path(output_dir) / "train_labels.pth")
-        torch.save(test_features, Path(output_dir) / "test_features.pth")
-        torch.save(test_labels, Path(output_dir) / "test_labels.pth")
-        print("Features are dumped!")
+        if arch in torch_models.__dict__.keys():  # torchvision models
+            model = torch_models.__dict__[arch](**arch_kwargs)
+            model.fc = nn.Identity()
+        elif arch in vits.__dict__.keys():  # vision transformer models
+            model = vits.__dict__[arch](**arch_kwargs)
+        else:
+            raise NotImplementedError(f"Architecture {arch} not supported")
+
+        model.cuda()
+        utils.load_pretrained_weights(model, pretrained_weights, ckp_key)
+        model.eval()
+        print(f"Model {arch} built.")
+
+        # ============ extract features ... ============
+        print("Extracting features for train set...")
+        train_features = extract_features(model, train_loader)
+        print("Extracting features for val set...")
+        test_features = extract_features(model, val_loader)
+        print("Features are ready!")
+
+        train_labels = torch.tensor([s[-1] for s in train_dataset.samples]).long()
+        test_labels = torch.tensor([s[-1] for s in val_dataset.samples]).long()
+
+        if dump_features and dist.is_main_process():
+            print("Dumping features...")
+            torch.save(train_features, Path(output_dir) / "train_features.pth")
+            torch.save(train_labels, Path(output_dir) / "train_labels.pth")
+            torch.save(test_features, Path(output_dir) / "test_features.pth")
+            torch.save(test_labels, Path(output_dir) / "test_labels.pth")
+            print("Features are dumped!")
 
     if use_cuda:
         train_features, train_labels = train_features.cuda(), train_labels.cuda()
         test_features, test_labels = test_features.cuda(), test_labels.cuda()
     else:
-        torch_dist.destroy_process_group()  # destroy default process group to prevent NCCL timeout
-    _out = []
+        if dist.is_enabled():
+            print("Stopping knn evaluation because use_cuda is False and distributed is enabled.")
+            return
+
+    out = []
     if dist.is_main_process():
         for k in nb_knn:
             top1, top5 = knn_classifier(train_features, train_labels, test_features, test_labels, k, temperature)
-            _out.append({"k": k, "top1": top1, "top5": top5})
+            out.append({"k": k, "top1": top1, "top5": top5})
             print(f"{k}-NN classifier result: Top1: {top1}, Top5: {top5}")
 
         with (Path(output_dir) / "knn.log").open("a") as f:
-            for line in _out:
+            for line in out:
                 f.write(json.dumps(line) + "\n")
     print("knn evaluation is done!")
 
@@ -116,24 +127,41 @@ def eval_knn(
 @torch.no_grad()
 def extract_features(model, data_loader):
     metric_logger = utils.MetricLogger(delimiter=" ")
-    features = []
-    labels = []
+    features = None
     for samples, index in metric_logger.log_every(data_loader, 100):
         samples = samples.cuda(non_blocking=True)
         index = index.cuda(non_blocking=True)
 
         feats = model(samples)
-        feats = nnf.normalize(feats, dim=1)
+        feats = nnf.normalize(feats, dim=1, p=2)
 
-        feats = gather(feats)
-        index = gather(index)
-        features.append(feats.cpu())
-        labels.append(index.cpu())
+        if dist.get_rank() == 0 and features is None:
+            features = torch.zeros(len(data_loader.dataset), feats.shape[-1])
+            print(f"Storing features into tensor of shape {features.shape}")
 
-    all_features = torch.cat(features, dim=0)
-    all_labels = torch.cat(labels, dim=0)
+            # get indexes from all processes
+            y_all = torch.empty(dist.get_world_size(), index.size(0), dtype=index.dtype, device=index.device)
+            y_l = list(y_all.unbind(0))
+            y_all_reduce = torch.distributed.all_gather(y_l, index, async_op=True)
+            y_all_reduce.wait()
+            index_all = torch.cat(y_l)
 
-    return all_features, all_labels
+            # share features between processes
+            feats_all = torch.empty(
+                dist.get_world_size(),
+                feats.size(0),
+                feats.size(1),
+                dtype=feats.dtype,
+                device=feats.device,
+            )
+            output_l = list(feats_all.unbind(0))
+            output_all_reduce = torch.distributed.all_gather(output_l, feats, async_op=True)
+            output_all_reduce.wait()
+
+            # update storage feature matrix
+            if dist.get_rank() == 0:
+                features.index_copy_(0, index_all.cpu(), torch.cat(output_l).cpu())
+    return features
 
 
 @torch.no_grad()
@@ -175,6 +203,12 @@ def knn_classifier(train_features, train_labels, test_features, test_labels, k, 
     top1 = top1 * 100.0 / total
     top5 = top5 * 100.0 / total
     return top1, top5
+
+
+class ReturnIndexDataset(datasets.ImageFolder):
+    def __getitem__(self, idx):
+        img, lab = super(ReturnIndexDataset, self).__getitem__(idx)
+        return img, idx
 
 
 def get_knn_args_parser():
