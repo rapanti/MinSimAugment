@@ -11,8 +11,8 @@ momentum: 0.9
 weight_decay: 1e-4  # 1e-6 in paper, but 1e-4 on https://github.com/google-research/simclr
 epochs: 100
 warmup_epochs: 10
-use_acs: false
-num_crops: 2
+use_hvs: false
+num_views: 2
 
 dataset: imagenet
 data_path: null

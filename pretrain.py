@@ -18,7 +18,7 @@ import losses
 # import models.vision_transformer as vits
 import optimizers
 import utils
-from acs import adversarial_crop_selection
+from hvs import adversarial_crop_selection
 from methods import SimCLR
 from transforms import SimCLRTransform, custom_collate
 
@@ -42,8 +42,8 @@ def main(
         weight_decay: float = 1e-4,
         epochs: int = 100,
         warmup_epochs: int = 10,
-        use_acs: bool = False,
-        num_crops: int = 2,
+        use_hvs: bool = False,
+        num_views: int = 2,
         use_fp16: bool = True,
         num_workers: int = 8,
         data_path: str = "path/to/dataset",
@@ -88,7 +88,7 @@ def main(
 
     # ============ preparing data ... ============
     batch_size_per_gpu = batch_size // dist.get_world_size() // GRAD_ACCUM_STEPS
-    train_dataset, _ = data.make_dataset(data_path, dataset, True, SimCLRTransform(num_views=num_crops))
+    train_dataset, _ = data.make_dataset(data_path, dataset, True, SimCLRTransform(num_views=num_views))
     data_loader = DataLoader(
         train_dataset,
         batch_size=batch_size_per_gpu,
@@ -153,7 +153,7 @@ def main(
         # ============ training one epoch ... ============
         start = time.time()
         train_stats, metrics = \
-            train_one_epoch(model, ntx_loss, data_loader, optimizer, lr_schedule, scaler, epoch, logger, use_acs)
+            train_one_epoch(model, ntx_loss, data_loader, optimizer, lr_schedule, scaler, epoch, logger, use_hvs)
         total_time += int(time.time() - start)
 
         # ============ writing logs ... ============
@@ -190,7 +190,7 @@ def train_one_epoch(
         scaler,
         epoch,
         logger,
-        use_acs,
+        use_hvs,
 ):
     metrics = defaultdict(list)
     metrics["epoch"] = epoch
@@ -206,8 +206,8 @@ def train_one_epoch(
         images, params, _ = batch
         images = [img.cuda(non_blocking=True) for img in images]
 
-        # adversarial crop selection
-        if use_acs:
+        # hard view selection
+        if use_hvs:
             images, selection, _ = adversarial_crop_selection(images, model, criterion)
 
         # regular training
@@ -251,7 +251,7 @@ def get_pretrain_args_parser():
     p.add_argument("--proj-hidden-dim", default=2048, type=int, help="hidden dimension of projection head")
     p.add_argument("--out-dim", default=128, type=int, help="output dimension of projection head")
     p.add_argument("--use-bn-in-head", default=True, type=utils.bool_flag,
-                   help="whether to use batchnorm in projection head")
+                   help="whether to use batch norm in projection head")
     # Optimization parameters
     p.add_argument("--batch-size", default=4096, type=int, help="batch size")
     p.add_argument("--optim", default="lars", type=str, help="optimizer")
@@ -264,8 +264,8 @@ def get_pretrain_args_parser():
     p.add_argument("--grad-accum-steps", default=1, type=int, help="gradient accumulation steps")
     p.add_argument("--use-fp16", default=True, type=utils.bool_flag, help="use mixed precision training")
     # ACS parameters
-    p.add_argument("--use-acs", default=False, type=utils.bool_flag, help="whether to use adversarial crop selection")
-    p.add_argument("--num_crops", default=2, type=int, help="number of crops")
+    p.add_argument("--use-hvs", default=False, type=utils.bool_flag, help="whether to use hard view selection")
+    p.add_argument("--num_views", default=2, type=int, help="number of views")
     # Misc
     p.add_argument("--dataset", default="imagenet", type=str, help="dataset name")
     p.add_argument("--data-path", default=None, type=str, help="path to data")
