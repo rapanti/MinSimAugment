@@ -32,10 +32,9 @@ from torchvision.transforms import TrivialAugmentWide
 def custom_collate(batch):
     bs = len(batch[0][0][0])
     images = [torch.stack([item[0][0][n] for item in batch]) for n in range(bs)]
-    # params = [[item[0][1][n] for item in batch] for n in range(bs)]
+    params = [[item[0][1][n] for item in batch] for n in range(bs)]
     # target = [item[1] for item in batch]
-    # return images, params
-    return images
+    return images, params
 
 
 def main(cfg):
@@ -107,14 +106,14 @@ def main(cfg):
     else:
         mean, std = data.IMAGENET_DEFAULT_MEAN, data.IMAGENET_DEFAULT_STD
 
-    transform = custom_transform.TransformParams(
-        crop_size=cfg.crop_size,
-        crop_scale=cfg.crop_scale,
-        blur_prob=cfg.blur_prob,
-        hflip_prob=cfg.hflip_prob,
-        mean=mean,
-        std=std,
-    )
+    # transform = custom_transform.TransformParams(
+    #     crop_size=cfg.crop_size,
+    #     crop_scale=cfg.crop_scale,
+    #     blur_prob=cfg.blur_prob,
+    #     hflip_prob=cfg.hflip_prob,
+    #     mean=mean,
+    #     std=std,
+    # )
 
     transform = TrivialAugmentWide()
 
@@ -130,7 +129,7 @@ def main(cfg):
         num_workers=cfg.num_workers,
         pin_memory=True,
         drop_last=True,
-        collate_fn=custom_collate,
+        # collate_fn=custom_collate,
     )
 
     select_fn = select_crops.names[cfg.select_fn]
