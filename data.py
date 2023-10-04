@@ -1,7 +1,7 @@
 import os
 import sys
 from typing import Sequence, Tuple
-
+import torchvision.transforms.functional as F
 from torchvision.transforms import CenterCrop, ColorJitter, Compose, GaussianBlur, InterpolationMode,  \
     Normalize, RandomApply, RandomGrayscale, RandomHorizontalFlip, RandomResizedCrop, Resize, ToTensor
 from torchvision.datasets import CIFAR10, CIFAR100, ImageFolder, VOCDetection, INaturalist, Places365, \
@@ -32,6 +32,7 @@ class MultiCropsTransform:
             # img, p = self.base_transform(x)
             # TrivialAugment does not return params
             img = self.base_transform(x)
+            img = F.to_tensor(img)
             images.append(img)
             params.append([])
         return images, params
