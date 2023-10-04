@@ -30,12 +30,11 @@ from torchvision.transforms import TrivialAugmentWide
 
 
 def custom_collate(batch):
-    # bs = len(batch[0][0])
-    # images = [torch.stack([item[n] for item in batch]) for n in range(bs)]
-    # params = [[item[0][1][n] for item in batch] for n in range(bs)]
-    # target = [item[1] for item in batch]
-    # return images, params
-    return torch.stack(batch)
+    bs = len(batch[0][0][0])
+    images = [torch.stack([item[0][0][n] for item in batch]) for n in range(bs)]
+    params = [[item[0][1][n] for item in batch] for n in range(bs)]
+    target = [item[1] for item in batch]
+    return images, params
 
 
 def main(cfg):
