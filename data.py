@@ -27,12 +27,13 @@ class MultiCropsTransform:
 
     def __call__(self, x):
         images = []
-        params = []
+        # params = []
         for _ in range(self.num_crops):
-            img, p = self.base_transform(x)
+            # img, p = self.base_transform(x)
+            img = self.base_transform(x)
             images.append(img)
-            params.append(p)
-        return images, params
+            # params.append(p)
+        return images
 
 
 def make_normalize_transform(
