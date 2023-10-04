@@ -130,7 +130,7 @@ def main(cfg):
         num_workers=cfg.num_workers,
         pin_memory=True,
         drop_last=True,
-        # collate_fn=custom_collate,
+        collate_fn=custom_collate,
     )
 
     select_fn = select_crops.names[cfg.select_fn]
