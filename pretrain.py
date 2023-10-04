@@ -26,14 +26,16 @@ import utils
 
 from models import resnet_cifar, resnet, vision_transformer as vits
 from torchsummary import summary
+from torchvision.transforms import TrivialAugmentWide
 
 
 def custom_collate(batch):
     bs = len(batch[0][0][0])
     images = [torch.stack([item[0][0][n] for item in batch]) for n in range(bs)]
-    params = [[item[0][1][n] for item in batch] for n in range(bs)]
+    # params = [[item[0][1][n] for item in batch] for n in range(bs)]
     # target = [item[1] for item in batch]
-    return images, params
+    # return images, params
+    return images
 
 
 def main(cfg):
@@ -113,6 +115,9 @@ def main(cfg):
         mean=mean,
         std=std,
     )
+
+    transform = TrivialAugmentWide()
+
     multi_crops_transform = data.MultiCropsTransform(transform, cfg.num_crops)
     dataset, _ = data.make_dataset(cfg.data_path, cfg.dataset, True, multi_crops_transform)
 
@@ -183,12 +188,12 @@ def train(loader, model, criterion, optimizer, epoch, cfg, fp16, board, select_f
         "loss": [],
         "lr": [],
         "selected": [],
-        "params": [],
+        # "params": [],
         "sample-loss": [],
     }
     metric_logger = utils.MetricLogger(delimiter=" ")
     header = 'Epoch: [{}/{}]'.format(epoch, cfg.epochs)
-    for it, (images, params) in enumerate(metric_logger.log_every(loader, cfg.print_freq, header)):
+    for it, images in enumerate(metric_logger.log_every(loader, cfg.print_freq, header)):
         it = len(loader) * epoch + it  # global training iteration
 
         images = [im.cuda(non_blocking=True) for im in images]
@@ -223,7 +228,7 @@ def train(loader, model, criterion, optimizer, epoch, cfg, fp16, board, select_f
         metrics["lr"].append(optimizer.param_groups[0]["lr"])
         if cfg.use_adv_metric and it % cfg.adv_metric_freq == 0:
             metrics["selected"].append(selected.tolist())
-            metrics["params"].append(params)
+            # metrics["params"].append(params)
             metrics["sample-loss"].append(sample_loss.tolist())
 
         if dist.is_main_process() and it % cfg.logger_freq == 0:
