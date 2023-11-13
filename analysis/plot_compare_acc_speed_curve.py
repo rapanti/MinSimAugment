@@ -3,8 +3,8 @@ import json
 import os
 
 # Define the paths to the directories containing eval.log files
-# experiment1_dir = '/work/dlclarge1/ferreira-simsiam/minsim_experiments/simsiam-minsim-transfer-learning-seed0'
-experiment1_dir = '/work/dlclarge1/ferreira-simsiam/minsim_experiments/1_completed/dino-minsim-baseline-vit_small_p16-ImageNet-ep100-bs512-select_cross-ncrops4-lr0.0005-wd0.04-out_dim65k-seed0'
+experiment1_dir = '/work/dlclarge1/ferreira-simsiam/minsim_experiments/simsiam-minsim-transfer-learning-seed0'
+# experiment1_dir = '/work/dlclarge1/ferreira-simsiam/minsim_experiments/1_completed/dino-minsim-baseline-vit_small_p16-ImageNet-ep100-bs512-select_cross-ncrops4-lr0.0005-wd0.04-out_dim65k-seed0'
 # experiment2_dir = '/work/dlclarge1/ferreira-simsiam/minsim_experiments/simsiam-vanilla-transfer-learning-seed0'
 experiment2_dir = '/work/dlclarge1/ferreira-simsiam/minsim_experiments/simsiam-vanilla-transfer-learning-seed0'
 plot_name = "acc_speed_comparison_dino_100ep.png"
