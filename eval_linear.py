@@ -150,8 +150,8 @@ def main(cfg):
     # Optionally resume from a checkpoint
     to_restore = {"epoch": 0, "best_acc": 0.}
 
-    checkpoint_name = "checkpoint.pth.tar" if cfg.dataset == "ImageNet" else f"checkpoint_{cfg.dataset}.pth.tar"
-
+    # checkpoint_name = "checkpoint.pth.tar" if cfg.dataset == "ImageNet" else f"checkpoint_{cfg.dataset}.pth.tar"
+    checkpoint_name = f"{'fine' if cfg.finetune else 'eval'}_checkpoint_{str(cfg.dataset).lower()}.pth"
     if cfg.finetune:
         # load classifier and backbone
         utils.restart_from_checkpoint(
@@ -212,6 +212,9 @@ def main(cfg):
             path = os.path.join(cfg.output_dir, checkpoint_name)
             torch.save(save_dict, path)
 
+    if dist.is_main_process():
+        with (Path(cfg.output_dir) / "results.txt").open("a") as f:
+            f.write(f"{'fine' if cfg.finetune else 'eval'} of {cfg.dataset}:\t {best_acc}" + "\n")
     print("Training of the supervised linear classifier on frozen features completed.\n"
           "Top-1 test accuracy: {acc:.1f}".format(acc=best_acc))
 
