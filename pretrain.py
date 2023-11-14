@@ -442,6 +442,8 @@ def get_args_parser():
                    help="Log advanced metrics: transforms params, crop selection, sample-loss, ... (default: True)")
     p.add_argument("--adv_metric_freq", type=int,
                    help="Log advanced metrics every x iterations (default: 10)")
+    p.add_argument('--scale_factor_select', type=float,
+                   help="Scale images for select_fn")
     return p
 
 
