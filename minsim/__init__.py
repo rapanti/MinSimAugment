@@ -15,7 +15,8 @@ class MinSim(object):
                  num_global_crops_loader,
                  num_local_crops_loader,
                  local_crops_number,
-                 limit):
+                 limit,
+                 scale_factor_select):
         self.select_fn = select_fn
         self.student = student
         self.teacher = teacher
@@ -25,6 +26,7 @@ class MinSim(object):
         self.num_local_crops_loader = num_local_crops_loader
         self.local_crops_number = local_crops_number
         self.limit = limit
+        self.scale_factor_select = scale_factor_select
 
         # list of all valid combinations for global crops
         # equal to list of tuples with even and odd numbers
@@ -49,7 +51,7 @@ class MinSim(object):
     @torch.no_grad()
     def cross(self, images, epoch):
         bs = images[0].size(0)
-        inter = [interpolate(img, scale_factor=0.5) for img in images]
+        inter = [interpolate(img, scale_factor=self.scale_factor_select) for img in images]
         device = self.student.device
 
         score = torch.zeros(bs, device=device)

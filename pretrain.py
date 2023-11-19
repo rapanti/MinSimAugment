@@ -187,9 +187,17 @@ def main(cfg):
                                                cfg.epochs, len(data_loader))
     print(f"Loss, optimizer and schedulers ready.")
 
-    select_fn = MinSim(cfg.select_fn, student, teacher, dino_loss, fp16,
-                       cfg.num_global_crops_loader, cfg.num_local_crops_loader,
-                       cfg.local_crops_number, cfg.limit_comparisons)
+    select_fn = MinSim(cfg.select_fn,
+                       student,
+                       teacher,
+                       dino_loss,
+                       fp16,
+                       cfg.num_global_crops_loader,
+                       cfg.num_local_crops_loader,
+                       cfg.local_crops_number,
+                       cfg.limit_comparisons,
+                       cfg.scale_factor_select
+                       )
 
     # ============ optionally resume training ... ============
     to_restore = {"epoch": 0, "total_time": 0}
