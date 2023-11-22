@@ -1,4 +1,5 @@
 import torch
+from torch.nn.functional import interpolate
 import torch.nn.functional as nnf
 
 
@@ -8,12 +9,18 @@ def select_crops_identity(images, model, fp16):
 
 
 @torch.no_grad()
-def select_crops_cross(images, model, fp16):
+def select_crops_cross(images, model, fp16, scale_factor_select=1.0):
     b, c, h, w = images[0].shape
     device = images[0].device
+    if scale_factor_select != 1.0:
+        inter = [interpolate(img, scale_factor=scale_factor_select) for img in images]
 
     with torch.cuda.amp.autocast(fp16 is not None):
-        model_out = model.module.single_forward(torch.cat(images, dim=0))
+        if scale_factor_select != 1.0:
+            model_out = model.module.single_forward(torch.cat(inter, dim=0))
+        else:
+            model_out = model.module.single_forward(torch.cat(images, dim=0))
+            
     p1s, z1s = model_out[0].chunk(len(images)), model_out[1].chunk(len(images))
 
     out1 = torch.zeros_like(images[0])

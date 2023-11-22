@@ -193,7 +193,7 @@ def train(loader, model, criterion, optimizer, epoch, cfg, fp16, board, select_f
 
         images = [im.cuda(non_blocking=True) for im in images]
 
-        x1, x2, selected, sample_loss = select_fn(images, model, fp16)
+        x1, x2, selected, sample_loss = select_fn(images, model, fp16, cfg.scale_factor_select)
 
         with torch.cuda.amp.autocast(fp16 is not None):
             p1, p2, z1, z2 = model(x1=x1, x2=x2)
@@ -297,6 +297,7 @@ def get_args_parser():
     # MinSim parameters:
     p.add_argument("--num_crops", default=2, type=int, help="Number of crops")
     p.add_argument("--select_fn", default="identity", type=str, choices=select_crops.names)
+    p.add_argument('--scale_factor_select', type=float, help="Scale images for select_fn")
 
     # Misc
     p.add_argument('--fp16', default=True, type=utils.bool_flag,
