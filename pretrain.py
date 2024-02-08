@@ -457,6 +457,8 @@ def get_args_parser():
                    help="Log advanced metrics every x iterations (default: 10)")
     p.add_argument('--scale_factor_select', type=float,
                    help="Scale images for select_fn")
+    p.add_argument('--hvp_step', type=int,
+                   help="Use HVP every 'x' training-step.")
     return p
 
 
