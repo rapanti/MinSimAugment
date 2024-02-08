@@ -58,8 +58,8 @@ class MinSim(object):
               [torch.empty_like(images[-1]) for _ in range(self.local_crops_number)]
 
         with torch.cuda.amp.autocast(self.fp16 is not None):
-            teacher_output = self.teacher(inter[:self.num_global_crops_loader])
-            student_output = self.student(inter)
+            teacher_output = self.teacher(images[:self.num_global_crops_loader])
+            student_output = self.student(images)
             student_output, teacher_output = self.criterion.prepare_outputs(student_output, teacher_output, epoch)
             student_output, teacher_output = student_output.chunk(len(images)), teacher_output.chunk(
                 self.num_global_crops_loader)
