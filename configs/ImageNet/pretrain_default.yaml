@@ -43,6 +43,7 @@ num_global_crops_loader: 2
 num_local_crops_loader: 8
 select_fn: identity
 scale_factor_select: 1.0
+hvp_step: 1
 
 # Misc parameters
 dataset: ImageNet
