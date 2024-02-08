@@ -2,7 +2,6 @@ import itertools as it
 
 import numpy as np
 import torch
-from torch.nn.functional import interpolate
 
 
 class MinSim(object):
@@ -51,7 +50,6 @@ class MinSim(object):
     @torch.no_grad()
     def cross(self, images, epoch):
         bs = images[0].size(0)
-        inter = [interpolate(img, scale_factor=self.scale_factor_select) for img in images]
         device = self.student.device
 
         score = torch.zeros(bs, device=device)
