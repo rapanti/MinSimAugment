@@ -12,7 +12,7 @@ def init_distributed_mode(args):
         args.world_size = int(os.environ['WORLD_SIZE'])
         args.gpu = int(os.environ['LOCAL_RANK'])
     # launched with submitit on a slurm cluster
-    elif 'SLURM_PROCID' in os.environ:
+    elif _is_slurm_job_process():
         args.rank = int(os.environ['SLURM_PROCID'])
         args.gpu = args.rank % torch.cuda.device_count()
     # launched naively with `python main_dino.py`
@@ -26,12 +26,7 @@ def init_distributed_mode(args):
         print('Does not support training without GPU.')
         sys.exit(1)
 
-    dist.init_process_group(
-        backend=args.dist_backend,
-        init_method=args.dist_url,
-        world_size=args.world_size,
-        rank=args.rank,
-    )
+    dist.init_process_group('nccl' if dist.is_nccl_available() else 'gloo')
 
     torch.cuda.set_device(args.gpu)
     print('| distributed init (rank {}): {}'.format(

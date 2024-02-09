@@ -15,7 +15,13 @@ momentum: 0.9
 pred_dim: 512
 weight_decay: 0.0005
 # MinSim parameters
-select_fn: cross
+select_fn: identity
+num_crops: 2
+use_intermitting_training: false
+hvp_step: 1
+scale_factor_select: 1.0
 # Misc parameters
 data_path: null
 output_dir: null
+optimizer: sgd
+clip_grad: 0.0

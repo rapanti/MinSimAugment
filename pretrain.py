@@ -25,7 +25,6 @@ import custom_transform
 import utils
 
 from models import resnet_cifar, resnet, vision_transformer as vits
-from torchsummary import summary
 
 
 def custom_collate(batch):
@@ -193,7 +192,13 @@ def train(loader, model, criterion, optimizer, epoch, cfg, fp16, board, select_f
 
         images = [im.cuda(non_blocking=True) for im in images]
 
-        x1, x2, selected, sample_loss = select_fn(images, model, fp16, cfg.scale_factor_select)
+        if cfg.use_intermitting_training:
+            if it % cfg.hvp_step == 0:
+                x1, x2, selected, sample_loss = select_crops.select_crops_cross(images, model, fp16, cfg.scale_factor_select)
+            else:
+                x1, x2, selected, sample_loss = select_crops.select_crops_identity(images, model, fp16, cfg.scale_factor_select)
+        else:
+            x1, x2, selected, sample_loss = select_fn(images, model, fp16, cfg.scale_factor_select)
 
         with torch.cuda.amp.autocast(fp16 is not None):
             p1, p2, z1, z2 = model(x1=x1, x2=x2)
@@ -298,6 +303,8 @@ def get_args_parser():
     p.add_argument("--num_crops", default=2, type=int, help="Number of crops")
     p.add_argument("--select_fn", default="identity", type=str, choices=select_crops.names)
     p.add_argument('--scale_factor_select', type=float, help="Scale images for select_fn")
+    p.add_argument('--use_intermitting_training', type=utils.bool_flag, help="Whether to use intermitting training.")
+    p.add_argument('--hvp_step', type=int, help="Use HVP every 'hvp_step' steps.")
 
     # Misc
     p.add_argument('--fp16', default=True, type=utils.bool_flag,

@@ -10,14 +10,14 @@ def select_crops_identity(images, model, fp16):
 
 @torch.no_grad()
 def select_crops_cross(images, model, fp16, scale_factor_select=1.0):
-    b, c, h, w = images[0].shape
+    bs = images.size(0)
     device = images[0].device
-    if scale_factor_select != 1.0:
-        inter = [interpolate(img, scale_factor=scale_factor_select) for img in images]
+    if scale_factor_select < 1.0:
+        _images = [interpolate(img, scale_factor=scale_factor_select) for img in images]
 
     with torch.cuda.amp.autocast(fp16 is not None):
-        if scale_factor_select != 1.0:
-            model_out = model.module.single_forward(torch.cat(inter, dim=0))
+        if scale_factor_select < 1.0:
+            model_out = model.module.single_forward(torch.cat(_images, dim=0))
         else:
             model_out = model.module.single_forward(torch.cat(images, dim=0))
             
@@ -25,8 +25,8 @@ def select_crops_cross(images, model, fp16, scale_factor_select=1.0):
 
     out1 = torch.zeros_like(images[0])
     out2 = torch.zeros_like(images[0])
-    score = torch.full([b], torch.inf, device=device)
-    selected = torch.zeros((2, b), dtype=torch.uint8)
+    score = torch.full([bs], torch.inf, device=device)
+    selected = torch.zeros((2, bs), dtype=torch.uint8)
 
     for n in range(len(images)):
         p1, z1 = p1s[n], z1s[n]
