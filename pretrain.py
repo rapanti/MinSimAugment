@@ -192,7 +192,7 @@ def train(loader, model, criterion, optimizer, epoch, cfg, fp16, board, select_f
 
         images = [im.cuda(non_blocking=True) for im in images]
 
-        if cfg.use_intermitting_training:
+        if cfg.use_alternating_training:
             if it % cfg.hvp_step == 0:
                 x1, x2, selected, sample_loss = select_crops.select_crops_cross(images, model, fp16, cfg.scale_factor_select)
             else:
@@ -303,7 +303,7 @@ def get_args_parser():
     p.add_argument("--num_crops", default=2, type=int, help="Number of crops")
     p.add_argument("--select_fn", default="identity", type=str, choices=select_crops.names)
     p.add_argument('--scale_factor_select', type=float, help="Scale images for select_fn")
-    p.add_argument('--use_intermitting_training', type=utils.bool_flag, help="Whether to use intermitting training.")
+    p.add_argument('--use_alternating_training', type=utils.bool_flag, help="Whether to use alternating training.")
     p.add_argument('--hvp_step', type=int, help="Use HVP every 'hvp_step' steps.")
 
     # Misc

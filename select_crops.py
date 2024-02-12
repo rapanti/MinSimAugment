@@ -4,13 +4,13 @@ import torch.nn.functional as nnf
 
 
 @torch.no_grad()
-def select_crops_identity(images, model, fp16):
+def select_crops_identity(images, model, fp16, scale_factor_select=1.0):
     return images[0], images[1], torch.zeros(1), torch.zeros(1)
 
 
 @torch.no_grad()
 def select_crops_cross(images, model, fp16, scale_factor_select=1.0):
-    bs = images.size(0)
+    bs, _, _, _ = images[0].shape
     device = images[0].device
     if scale_factor_select < 1.0:
         _images = [interpolate(img, scale_factor=scale_factor_select) for img in images]

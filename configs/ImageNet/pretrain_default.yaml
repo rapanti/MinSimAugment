@@ -19,7 +19,7 @@ weight_decay: 0.0001
 # MinSim parameters
 select_fn: identity
 num_crops: 2
-use_intermitting_training: false
+use_alternating_training: false
 hvp_step: 1
 scale_factor_select: 1.0
 # Misc parameters
