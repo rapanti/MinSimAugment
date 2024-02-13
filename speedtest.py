@@ -39,12 +39,14 @@ def main(cfg):
     dist.init_distributed_mode() if not dist.is_enabled() else None
     cudnn.benchmark = True
 
+    Path(cfg.output_dir).mkdir(parents=True, exist_ok=True)
+
     print(f"git:\n  {utils.get_sha()}\n")
     print('Configuration:')
     if isinstance(cfg, argparse.Namespace):
         for k, v in vars(cfg).items():
             print(f"{k}: {v}")
-    elif isinstance(cfg, OmegaConf):
+    elif OmegaConf.is_config(cfg):
         print(OmegaConf.to_yaml(cfg))
     else:
         print(cfg)
@@ -90,7 +92,7 @@ def main(cfg):
     )
 
     sampler = DistributedSampler(dataset)
-    batch_size_per_gpu = cfg.batch_size // cfg.grad_accum_steps // dist.get_world_size()
+    batch_size_per_gpu = cfg.batch_size // dist.get_world_size()
     data_loader = DataLoader(
         dataset,
         sampler=sampler,
@@ -340,7 +342,6 @@ def train_one_epoch(
             fp16.step(optimizer)
             fp16.update()
 
-            dino_loss.update_center(teacher_output, cfg.grad_accum_steps)
             optimizer.zero_grad()
 
             # EMA update for the teacher
@@ -708,7 +709,7 @@ class DINOLoss(nn.Module):
         Update center used for teacher output.
         """
         batch_center = torch.sum(teacher_output, dim=0, keepdim=True)
-        dist.all_reduce(batch_center)
+        torch.distributed.all_reduce(batch_center)
         batch_center = batch_center / (len(teacher_output) * dist.get_world_size())
 
         # ema update
@@ -716,7 +717,35 @@ class DINOLoss(nn.Module):
 
 
 if __name__ == "__main__":
-    parser = get_args_parser()
-    args = parser.parse_args()
-    Path(args.output_dir).mkdir(parents=True, exist_ok=True)
-    main(args)
+    # load pretrain config
+    cfg = OmegaConf.load('speedtest.yaml')
+
+    # init distributed
+    dist.init_distributed_mode()
+    utils.fix_random_seeds(cfg.seed)
+    
+    cfg.output_dir = 'vanilla'
+    print('\n*** VANILLA ***\n')
+    main(cfg)
+
+    cfg.use_hvp = True
+    cfg.num_global_crops_loader = 4
+    cfg.num_local_crops_loader = 16
+    cfg.output_dir = 'hvp-step1'
+    print('\n*** HVP - STEP = 1 ***\n')
+    main(cfg)
+
+    cfg.hvp_step = 2
+    cfg.output_dir = 'hvp-step2'
+    print('\n*** HVP - STEP = 2 ***\n')
+    main(cfg)
+
+    cfg.hvp_step = 3
+    cfg.output_dir = 'hvp-step3'
+    print('\n*** HVP - STEP = 3 ***\n')
+    main(cfg)
+
+    cfg.hvp_step = 4
+    cfg.output_dir = 'hvp-step4'
+    print('\n*** HVP - STEP = 4 ***\n')
+    main(cfg)
