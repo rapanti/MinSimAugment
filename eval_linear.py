@@ -343,59 +343,59 @@ class LinearClassifier(nn.Module):
 def get_args_parser():
     p = argparse.ArgumentParser(description='Linear-Eval for DINO', add_help=False)
     # model parameters
-    p.add_argument('-a', '--arch', type=str,
+    p.add_argument('-a', '--arch', type=str, default='vit_small',
                    help="Model architecture (default: vit_small)")
-    p.add_argument('--img_size', type=int,
+    p.add_argument('--img_size', type=int, default=224,
                    help="input image size (default: 224)")
-    p.add_argument('--patch_size', type=int,
+    p.add_argument('--patch_size', type=int, default=16,
                    help="patch resolution of the model (default: 16)")
 
     # training parameters
-    p.add_argument('--avgpool', type=utils.bool_flag,
+    p.add_argument('--avgpool', type=utils.bool_flag, default=False,
                    help="Whether to concatenate the global average pooled features to the [CLS] token (default: False)")
-    p.add_argument('-b', '--batch-size', type=int,
+    p.add_argument('-b', '--batch-size', type=int, default=1024,
                    help='total-batch-size (default: 1024)')
-    p.add_argument('--epochs', type=int,
+    p.add_argument('--epochs', type=int, default=100,
                    help='number of total epochs to run (default: 100)')
-    p.add_argument('--lr', type=float,
+    p.add_argument('--lr', type=float, default=0.001,
                    help='initial (base) learning rate (default: 0.001)')
-    p.add_argument('--momentum', type=float,
+    p.add_argument('--momentum', type=float, default=0.9,
                    help='momentum (default: 0.9)')
-    p.add_argument('--n_last_blocks', type=int,
+    p.add_argument('--n_last_blocks', type=int, default=4,
                    help="Concatenate [CLS] tokens for the 'n' last blocks. (default: 4)")
-    p.add_argument('--optimizer', type=str, choices=['adamw', 'sgd', 'lars'],
+    p.add_argument('--optimizer', type=str, choices=['adamw', 'sgd', 'lars'], default='sgd',
                    help="Optimizer (default: sqd)")
-    p.add_argument('--wd', '--weight_decay', type=float, dest='weight_decay',
+    p.add_argument('--wd', '--weight_decay', type=float, dest='weight_decay', default=0.,
                    help='weight decay (default: 0.)')
-    p.add_argument('--finetune', type=utils.bool_flag,
+    p.add_argument('--finetune', type=utils.bool_flag, default=False,
                    help="")
 
     # augmentation parameters
-    p.add_argument('--crop_size', type=int,
+    p.add_argument('--crop_size', type=int, default=224,
                    help="Size of center-crop (default: 224)")
-    p.add_argument('--resize_size', type=int,
+    p.add_argument('--resize_size', type=int, default=256,
                    help="Resize size of images before center-crop (default: 256)")
 
     # misc parameters
-    p.add_argument('--dataset', type=str,
+    p.add_argument('--dataset', type=str, default='ImageNet',
                    help='Specify dataset. (default: ImageNet)')
     p.add_argument('--data_path', type=str,
                    help='(root) path to dataset')
-    p.add_argument('--dist-url', type=str,
+    p.add_argument('--dist-url', type=str, default='env://',
                    help="url used to set up distributed training (default: env://)")
-    p.add_argument('--dist-backend', type=str,
+    p.add_argument('--dist-backend', type=str, default='nccl',
                    help="distributed backend (default: nccl)")
-    p.add_argument('--ckp_key', type=str,
+    p.add_argument('--ckp_key', type=str, default='teacher',
                    help='Checkpoint key (default: teacher)')
-    p.add_argument('--pretrained', type=str,
+    p.add_argument('--pretrained', type=str, default='checkpoint.pth',
                    help="path to simsiam pretrained checkpoint (default: checkpoint.pth)")
-    p.add_argument('--output_dir', type=str,
+    p.add_argument('--output_dir', type=str, default='.',
                    help='Path to save logs and checkpoints (default: .)')
-    p.add_argument('--log_freq', type=int,
+    p.add_argument('--log_freq', type=int, default=50,
                    help="Log progress every x iterations to tensorboard (default: 50)")
-    p.add_argument('--num_workers', type=int,
+    p.add_argument('--num_workers', type=int, default=8,
                    help="number of data loading workers (default: 8)")
-    p.add_argument('--val_freq', type=int,
+    p.add_argument('--val_freq', type=int, default=1,
                    help="Validate model every x epochs (default: 1)")
 
     return p

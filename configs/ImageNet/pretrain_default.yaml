@@ -38,24 +38,20 @@ local_crops_scale:
 local_crops_size: 96
 
 # MinSim parameters
-limit_comparisons: 0
+use_hvp: true
+limit_combinations: 0
 num_global_crops_loader: 2
 num_local_crops_loader: 8
-select_fn: identity
-scale_factor_select: 1.0
 hvp_step: 1
 
 # Misc parameters
-dataset: ImageNet
-data_path: null
-dist_backend: nccl
-dist_url: env://
+dataset: imagenet
+data_path: .
 grad_accum_steps: 1
-log_freq: 50
 num_workers: 8
 print_freq: 10
 saveckp_freq: 0
 seed: 0
 output_dir: .
-use_adv_metric: true
-adv_metric_freq: 10
+log_metrics: false
+log_adv_metrics: false

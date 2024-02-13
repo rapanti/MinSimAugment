@@ -1,17 +1,17 @@
 import argparse
-import json
 import math
 import os
 import sys
 import time
 import datetime
-from collections import defaultdict
 from pathlib import Path
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.parallel
 import torch.nn.utils.clip_grad
+import torch.nn.functional as nnf
 import torch.backends.cudnn as cudnn
 import torch.optim
 import torch.utils.data
@@ -25,8 +25,7 @@ import hvp
 import utils
 from models import resnet, resnet_cifar, vision_transformer as vits
 from utils import distributed as dist, optimizers
-from utils.dino import MultiCropWrapper, DINOHead, DINOLoss
-
+from utils.dino import MultiCropWrapper, DINOHead
 
 def custom_collate(batch):
     ncrops = len(batch[0][0][0])
@@ -219,25 +218,19 @@ def main(cfg):
         cfg.limit_combinations,
     )
 
-    # ============ optionally resume training ... ============
-    to_restore = {"epoch": 0, "total_time": 0}
-    utils.restart_from_checkpoint(
-        os.path.join(cfg.output_dir, "checkpoint.pth"),
-        run_variables=to_restore,
-        student=student,
-        teacher=teacher,
-        optimizer=optimizer,
-        fp16_scaler=fp16,
-        dino_loss=dino_loss,
-    )
-    start_epoch = to_restore["epoch"]
-    total_time = to_restore["total_time"]
+    start_epoch = 0
+    total_time = 0
+
+    epoch_array = np.array([])
+    iter_array = np.array([])
+    train_array = np.array([])
+    data_array = np.array([])
 
     for epoch in range(start_epoch, cfg.epochs):
         data_loader.sampler.set_epoch(epoch)
 
         start = time.time()
-        train_stats, metrics = train_one_epoch(
+        train_stats, epoch_time, iter_times, train_times, data_times = train_one_epoch(
             student,
             teacher,
             teacher_without_ddp,
@@ -252,34 +245,27 @@ def main(cfg):
             cfg,
         )
         total_time += int(time.time() - start)
-
-        save_dict = {
-            "student": student.state_dict(),
-            "teacher": teacher.state_dict(),
-            "optimizer": optimizer.state_dict(),
-            "epoch": epoch + 1,
-            "dino_loss": dino_loss.state_dict(),
-            "fp16_scaler": fp16.state_dict() if fp16 is not None else None,
-            "total_time": total_time,
-        }
-        utils.save_on_master(save_dict, os.path.join(cfg.output_dir, "checkpoint.pth"))
-        if cfg.saveckp_freq and epoch and epoch % cfg.saveckp_freq == 0:
-            utils.save_on_master(
-                save_dict, os.path.join(cfg.output_dir, f"checkpoint{epoch:04}.pth")
-            )
-        log_stats = {
-            **{f"train_{k}": v for k, v in train_stats.items()},
-            "epoch": epoch,
-        }
-        if dist.is_main_process():
-            with (Path(cfg.output_dir) / "pretrain.log").open("a") as f:
-                f.write(json.dumps(log_stats) + "\n")
-            if metrics is not None:
-                with (Path(cfg.output_dir) / "metrics.json").open("a") as f:
-                    f.write(json.dumps(metrics) + "\n")
+        epoch_array = np.append(epoch_array, epoch_time)
+        iter_array = np.append(iter_array, iter_times)
+        train_array = np.append(train_array, train_times)
+        data_array = np.append(data_array, data_times)
+    
+    if dist.is_main_process():
+        with open(os.path.join(cfg.output_dir, "epoch_time.npy"), 'wb') as f:
+            np.save(f, epoch_array)
+        with open(os.path.join(cfg.output_dir, "iter_time.npy"), 'wb') as f:
+            np.save(f, iter_array)
+        with open(os.path.join(cfg.output_dir, "train_time.npy"), 'wb') as f:
+            np.save(f, train_array)
+        with open(os.path.join(cfg.output_dir, "data_time.npy"), 'wb') as f:
+            np.save(f, data_array)
 
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
-    print("Training time {}".format(total_time_str))
+    print(f"Total Training time {total_time_str}")
+    print(f"Epoch Times: mean = {epoch_array.mean()}, std = {epoch_array.std()}, median = {epoch_array.median()}")
+    print(f"Iter Times: mean = {iter_array.mean()}, std = {iter_array.std()}, median = {iter_array.median()}")
+    print(f"Train Times: mean = {train_array.mean()}, std = {train_array.std()}, median = {train_array.median()}")
+    print(f"Data Times: mean = {data_array.mean()}, std = {data_array.std()}, median = {data_array.median()}")
 
 
 def train_one_epoch(
@@ -296,14 +282,14 @@ def train_one_epoch(
     fp16,
     cfg,
 ):
-    metrics = None
-    if cfg.log_metrics:
-        metrics = defaultdict(list)
-        metrics["epoch"] = epoch
     metric_logger = utils.MetricLogger(delimiter=" ")
     header = "Epoch: [{}/{}]".format(epoch, cfg.epochs)
-    total_loss = 0
-    for it, (images, params) in enumerate(metric_logger.log_every(data_loader, cfg.print_freq, header)):
+    iter_times = []
+    data_times = []
+    train_times = []
+    start_time = time.time()
+    for it, (images, _) in enumerate(metric_logger.log_every(data_loader, cfg.print_freq, header)):
+        start_iter = time.time()
         # update weight decay and learning rate according to their schedule
         it = len(data_loader) * epoch + it  # global training iteration
 
@@ -315,22 +301,19 @@ def train_one_epoch(
         # move images to gpu
         images = [im.cuda(non_blocking=True) for im in images]
 
+        data_end = time.time()
         # HVP
-        selected, sample_loss = None, None
         if cfg.use_hvp:
             if not (it % cfg.hvp_step):
-                images, selected, sample_loss = hvp.hardviews(images, student, teacher, dino_loss, fp16, epoch)
+                images, _, _ = hvp.hardviews(images, student, teacher, dino_loss, fp16, epoch)
             else:
                 images = images[:2] + images[-cfg.local_crops_number :]
-
 
         # teacher and student forward passes + compute dino loss
         with autocast(fp16 is not None):
             teacher_output = teacher(images[:2])  # only the 2 global views pass through the teacher
             student_output = student(images)
             loss = dino_loss(student_output, teacher_output, epoch)
-            loss /= cfg.grad_accum_steps
-            total_loss += loss.detach()
 
         if not math.isfinite(loss.item()):
             print("Loss is {}, stopping training".format(loss.item()), force=True)
@@ -339,24 +322,23 @@ def train_one_epoch(
         # backpropagation
         loss.backward() if fp16 is None else fp16.scale(loss).backward()
 
-        if not (it + 1) % cfg.grad_accum_steps:
-            grad_norms = None
-            if fp16 is None:
-                if cfg.clip_grad:
-                    grad_norms = torch.nn.utils.clip_grad_norm_(
-                        student.parameters(), cfg.clip_grad
-                    )
-                utils.cancel_gradients_last_layer(epoch, student, cfg.freeze_last_layer)
-                optimizer.step()
-            else:
-                if cfg.clip_grad:
-                    fp16.unscale_(optimizer)
-                    grad_norms = torch.nn.utils.clip_grad_norm_(
-                        student.parameters(), cfg.clip_grad
-                    )
-                utils.cancel_gradients_last_layer(epoch, student, cfg.freeze_last_layer)
-                fp16.step(optimizer)
-                fp16.update()
+        grad_norms = None
+        if fp16 is None:
+            if cfg.clip_grad:
+                grad_norms = torch.nn.utils.clip_grad_norm_(
+                    student.parameters(), cfg.clip_grad
+                )
+            utils.cancel_gradients_last_layer(epoch, student, cfg.freeze_last_layer)
+            optimizer.step()
+        else:
+            if cfg.clip_grad:
+                fp16.unscale_(optimizer)
+                grad_norms = torch.nn.utils.clip_grad_norm_(
+                    student.parameters(), cfg.clip_grad
+                )
+            utils.cancel_gradients_last_layer(epoch, student, cfg.freeze_last_layer)
+            fp16.step(optimizer)
+            fp16.update()
 
             dino_loss.update_center(teacher_output, cfg.grad_accum_steps)
             optimizer.zero_grad()
@@ -367,29 +349,22 @@ def train_one_epoch(
                 for param_q, param_k in zip(student.module.parameters(), teacher_without_ddp.parameters()):
                     param_k.data.mul_(m).add_((1 - m) * param_q.detach().data)
 
-            torch.cuda.synchronize()
-
             # logging
-            metric_logger.update(loss=total_loss.item())
+            torch.cuda.synchronize()
+            end = time.time()
+            iter_times.append(end - start_iter)
+            data_times.append(data_end - start_iter)
+            train_times.append(end - data_end)
+
+            metric_logger.update(loss=loss.item())
             metric_logger.update(lr=optimizer.param_groups[0]["lr"])
             metric_logger.update(wd=optimizer.param_groups[0]["weight_decay"])
-
-            if metrics is not None:
-                metrics["training loss"].append(total_loss.item())
-                metrics["training lr"].append(optimizer.param_groups[0]["lr"])
-                metrics["training grad-norms"].append(grad_norms.item()) if grad_norms is not None else None
-
-                if cfg.log_adv_metric:
-                    metrics["selected"].append(selected.tolist()) if selected is not None else None
-                    metrics["params"].append(params) if params is not None else None
-                    metrics["sample-loss"].append(sample_loss.tolist()) if sample_loss is not None else None
-
-            total_loss = 0
-
+    
+    epoch_time = time.time() - start_time
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}, metrics
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}, epoch_time, iter_times, train_times, data_times
 
 
 def get_args_parser():
@@ -682,6 +657,62 @@ def get_args_parser():
         help="Whether to log advanced metrics: transforms params, crop selection, sample-loss, ... (default: False)",
     )
     return p
+
+
+class DINOLoss(nn.Module):
+    def __init__(self, out_dim, ncrops, warmup_teacher_temp, teacher_temp,
+                 warmup_teacher_temp_epochs, nepochs, student_temp=0.1,
+                 center_momentum=0.9):
+        super().__init__()
+        self.student_temp = student_temp
+        self.center_momentum = center_momentum
+        self.ncrops = ncrops
+        self.register_buffer("center", torch.zeros(1, out_dim))
+        # we apply a warm up for the teacher temperature because
+        # a too high temperature makes the training instable at the beginning
+        self.teacher_temp_schedule = np.concatenate((
+            np.linspace(warmup_teacher_temp,
+                        teacher_temp, warmup_teacher_temp_epochs),
+            np.ones(nepochs - warmup_teacher_temp_epochs) * teacher_temp
+        ))
+
+    def forward(self, student_output, teacher_output, epoch):
+        """
+        Cross-entropy between softmax outputs of the teacher and student networks.
+        """
+        student_out = student_output / self.student_temp
+        student_out = student_out.chunk(self.ncrops)
+
+        # teacher centering and sharpening
+        temp = self.teacher_temp_schedule[epoch]
+        teacher_out = nnf.softmax((teacher_output - self.center) / temp, dim=-1)
+        teacher_out = teacher_out.detach().chunk(2)
+
+        total_loss = 0
+        n_loss_terms = 0
+        for iq, q in enumerate(teacher_out):
+            for v in range(len(student_out)):
+                if v == iq:
+                    # we skip cases where student and teacher operate on the same view
+                    continue
+                loss = torch.sum(-q * nnf.log_softmax(student_out[v], dim=-1), dim=-1)
+                total_loss += loss.mean()
+                n_loss_terms += 1
+        total_loss /= n_loss_terms
+        self.update_center(teacher_output)
+        return total_loss
+
+    @torch.no_grad()
+    def update_center(self, teacher_output):
+        """
+        Update center used for teacher output.
+        """
+        batch_center = torch.sum(teacher_output, dim=0, keepdim=True)
+        dist.all_reduce(batch_center)
+        batch_center = batch_center / (len(teacher_output) * dist.get_world_size())
+
+        # ema update
+        self.center = self.center * self.center_momentum + batch_center * (1 - self.center_momentum)
 
 
 if __name__ == "__main__":

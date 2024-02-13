@@ -10,7 +10,6 @@ from omegaconf import OmegaConf
 from pretrain import get_args_parser as pretrain_get_args_parser
 from eval_linear import get_args_parser as eval_linear_get_args_parser
 from eval_knn import get_args_parser as eval_knn_get_args_parser
-import utils
 
 
 if __name__ == "__main__":
@@ -210,21 +209,21 @@ if __name__ == "__main__":
         run = [
             "torchrun",
             f"--nproc_per_node={slurm_args.gpus}",
-            f"--nnodes=1",
+            "--nnodes=1",
             # rdzv assigns ports automatically to workers when port=0, however DDP uses its own 'master_port'
-            f"--rdzv-endpoint=localhost:0",
-            f"--rdzv-backend=c10d",
-            f"--rdzv-id=$SLURM_JOB_ID",
-            f"code/run_pipeline.py"
+            "--rdzv-endpoint=localhost:0",
+            "--rdzv-backend=c10d",
+            "--rdzv-id=$SLURM_JOB_ID",
+            "code/run_pipeline.py"
         ]
 
         job_file = output_dir.joinpath("job.sh")
         with open(job_file, 'w') as file:
             for line in sbatch:
-                file.write(line + " \n")
+                file.write(line + "\n")
             file.write("\n")
 
             for line in run:
-                file.write(line + " \\\n")
+                file.write(line + "\\\n")
 
         out = subprocess.call(["sbatch", job_file], cwd=output_dir)

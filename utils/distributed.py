@@ -1,45 +1,43 @@
 import os
 import sys
+import time
 
 import torch
 import torch.distributed as dist
-import datetime
 
-def init_distributed_mode(args):
-    # launched with torch.distributed.launch
-    if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
-        args.rank = int(os.environ["RANK"])
-        args.world_size = int(os.environ['WORLD_SIZE'])
-        args.gpu = int(os.environ['LOCAL_RANK'])
+
+def init_distributed_mode():
+    # launched with torchrun
+    if "RANK" in os.environ and "WORLD_SIZE" in os.environ:
+        rank = int(os.environ["RANK"])
+        world_size = int(os.environ["WORLD_SIZE"])
+        gpu = int(os.environ["LOCAL_RANK"])
     # launched with submitit on a slurm cluster
-    elif 'SLURM_PROCID' in os.environ:
-        args.rank = int(os.environ['SLURM_PROCID'])
-        args.gpu = args.rank % torch.cuda.device_count()
-    # launched naively with `python main_dino.py`
-    # we manually add MASTER_ADDR and MASTER_PORT to env variables
+    elif _is_slurm_job_process():
+        rank = int(os.environ["SLURM_PROCID"])
+        world_size = torch.cuda.device_count()
+        gpu = rank % torch.cuda.device_count()
+    # launched naively with 'python main_dino.py'
     elif torch.cuda.is_available():
-        print('Will run the code on one GPU.')
-        args.rank, args.gpu, args.world_size = 0, 0, 1
-        os.environ['MASTER_ADDR'] = '127.0.0.1'
-        os.environ['MASTER_PORT'] = '29500'
+        print("Will run the code on one GPU.")
+        rank, gpu, world_size = 0, 0, 1
+        # we manually add MASTER_ADDR and MASTER_PORT to env variables
+        os.environ["MASTER_ADDR"] = "127.0.0.1"
+        os.environ["MASTER_PORT"] = "29500"
     else:
-        print('Does not support training without GPU.')
+        print("Does not support training without GPU.")
         sys.exit(1)
-
-    seconds = args.timeout if hasattr(args, "timeout") else 1800
-    timeout = datetime.timedelta(seconds=seconds)
-
+    
     dist.init_process_group(
-        backend=args.dist_backend,
-        init_method=args.dist_url,
-        world_size=args.world_size,
-        rank=args.rank,
-        timeout=timeout
+        backend="nccl" if dist.is_nccl_available() else "gloo",
+        world_size=world_size,
+        rank=rank,
     )
 
-    torch.cuda.set_device(args.gpu)
-    print('| distributed init (rank {}): {}'.format(
-        args.rank, args.dist_url), flush=True)
+    torch.cuda.set_device(gpu)
+    print(
+        f"{rank}:{world_size} - {time.strftime('%H:%M:%S')} - init distributed", flush=True
+    )
     dist.barrier()
     _restrict_print_to_main_process()
 
