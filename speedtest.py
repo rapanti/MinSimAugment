@@ -296,6 +296,8 @@ def train_one_epoch(
     for it, (images, _) in enumerate(
         metric_logger.log_every(data_loader, cfg.print_freq, header)
     ):
+        if it > 50:
+            break
         # update weight decay and learning rate according to their schedule
         it = len(data_loader) * epoch + it  # global training iteration
 
@@ -753,6 +755,9 @@ class DINOLoss(nn.Module):
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser("DINO SpeedTest")
+    parser.add_argument("--config", default=0, type=int, help="Which test to run.")
+    args = parser.parse_args()
     # load pretrain config
     cfg = OmegaConf.load("speedtest.yaml")
 
@@ -760,29 +765,43 @@ if __name__ == "__main__":
     dist.init_distributed_mode()
     utils.fix_random_seeds(cfg.seed)
 
-    cfg.output_dir = "vanilla"
-    print("\n*** VANILLA ***\n")
-    main(cfg)
+    if args.config == 0:
+        cfg.output_dir = "vanilla"
+        print("\n*** VANILLA ***\n")
+        main(cfg)
+    
+    if args.config == 1:
+        cfg.use_hvp = True
+        cfg.hvp_step = 1
+        cfg.num_global_crops_loader = 4
+        cfg.num_local_crops_loader = 16
+        cfg.output_dir = "hvp-step1"
+        print("\n*** HVP - STEP = 1 ***\n")
+        main(cfg)
 
-    cfg.use_hvp = True
-    cfg.hvp_step = 1
-    cfg.num_global_crops_loader = 4
-    cfg.num_local_crops_loader = 16
-    cfg.output_dir = "hvp-step1"
-    print("\n*** HVP - STEP = 1 ***\n")
-    main(cfg)
+    if args.config == 2:
+        cfg.use_hvp = True
+        cfg.hvp_step = 2
+        cfg.num_global_crops_loader = 4
+        cfg.num_local_crops_loader = 16
+        cfg.output_dir = "hvp-step2"
+        print("\n*** HVP - STEP = 2 ***\n")
+        main(cfg)
 
-    cfg.hvp_step = 2
-    cfg.output_dir = "hvp-step2"
-    print("\n*** HVP - STEP = 2 ***\n")
-    main(cfg)
-
-    cfg.hvp_step = 3
-    cfg.output_dir = "hvp-step3"
-    print("\n*** HVP - STEP = 3 ***\n")
-    main(cfg)
-
-    cfg.hvp_step = 4
-    cfg.output_dir = "hvp-step4"
-    print("\n*** HVP - STEP = 4 ***\n")
-    main(cfg)
+    if args.config == 3:
+        cfg.use_hvp = True
+        cfg.hvp_step = 3
+        cfg.num_global_crops_loader = 4
+        cfg.num_local_crops_loader = 16
+        cfg.output_dir = "hvp-step3"
+        print("\n*** HVP - STEP = 3 ***\n")
+        main(cfg)
+    
+    if args.config == 4:
+        cfg.use_hvp = True
+        cfg.hvp_step = 4
+        cfg.num_global_crops_loader = 4
+        cfg.num_local_crops_loader = 16
+        cfg.output_dir = "hvp-step4"
+        print("\n*** HVP - STEP = 4 ***\n")
+        main(cfg)
