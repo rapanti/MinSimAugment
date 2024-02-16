@@ -25,17 +25,17 @@ def get_sha():
     cwd = os.path.dirname(os.path.abspath(__file__))
 
     def _run(command):
-        return subprocess.check_output(command, cwd=cwd).decode('ascii').strip()
+        return subprocess.check_output(command, cwd=cwd).decode("ascii").strip()
 
-    sha = 'N/A'
+    sha = "N/A"
     diff = "clean"
-    branch = 'N/A'
+    branch = "N/A"
     try:
-        sha = _run(['git', 'rev-parse', 'HEAD'])
-        subprocess.check_output(['git', 'diff'], cwd=cwd)
-        diff = _run(['git', 'diff-index', 'HEAD'])
+        sha = _run(["git", "rev-parse", "HEAD"])
+        subprocess.check_output(["git", "diff"], cwd=cwd)
+        diff = _run(["git", "diff-index", "HEAD"])
         diff = "has uncommited changes" if diff else "clean"
-        branch = _run(['git', 'rev-parse', '--abbrev-ref', 'HEAD'])
+        branch = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"])
     except Exception:
         pass
     return f"sha: {sha}, status: {diff}, branch: {branch}"
@@ -67,13 +67,21 @@ def restart_from_checkpoint(ckp_path, run_variables=None, **kwargs):
         if key in checkpoint and value is not None:
             try:
                 msg = value.load_state_dict(checkpoint[key], strict=False)
-                print("=> loaded '{}' from checkpoint '{}' with msg {}".format(key, ckp_path, msg))
+                print(
+                    "=> loaded '{}' from checkpoint '{}' with msg {}".format(
+                        key, ckp_path, msg
+                    )
+                )
             except TypeError:
                 try:
                     msg = value.load_state_dict(checkpoint[key])
                     print("=> loaded '{}' from checkpoint: '{}'".format(key, ckp_path))
                 except ValueError:
-                    print("=> failed to load '{}' from checkpoint: '{}'".format(key, ckp_path))
+                    print(
+                        "=> failed to load '{}' from checkpoint: '{}'".format(
+                            key, ckp_path
+                        )
+                    )
         else:
             print("=> key '{}' not found in checkpoint: '{}'".format(key, ckp_path))
 
@@ -113,7 +121,7 @@ class SmoothedValue(object):
         """
         if not dist.is_enabled():
             return
-        t = torch.tensor([self.count, self.total], dtype=torch.float64, device='cuda')
+        t = torch.tensor([self.count, self.total], dtype=torch.float64, device="cuda")
         torch.distributed.barrier()
         torch.distributed.all_reduce(t)
         t = t.tolist()
@@ -148,7 +156,8 @@ class SmoothedValue(object):
             avg=self.avg,
             global_avg=self.global_avg,
             max=self.max,
-            value=self.value)
+            value=self.value,
+        )
 
 
 def reduce_dict(input_dict, average=True):
@@ -182,6 +191,9 @@ class MetricLogger(object):
     def __init__(self, delimiter="\t"):
         self.meters = defaultdict(SmoothedValue)
         self.delimiter = delimiter
+        self.iter_times = []
+        self.train_times = []
+        self.data_times = []
 
     def update(self, **kwargs):
         for k, v in kwargs.items():
@@ -195,15 +207,14 @@ class MetricLogger(object):
             return self.meters[attr]
         if attr in self.__dict__:
             return self.__dict__[attr]
-        raise AttributeError("'{}' object has no attribute '{}'".format(
-            type(self).__name__, attr))
+        raise AttributeError(
+            "'{}' object has no attribute '{}'".format(type(self).__name__, attr)
+        )
 
     def __str__(self):
         loss_str = []
         for name, meter in self.meters.items():
-            loss_str.append(
-                "{}: {}".format(name, str(meter))
-            )
+            loss_str.append("{}: {}".format(name, str(meter)))
         return self.delimiter.join(loss_str)
 
     def synchronize_between_processes(self):
@@ -216,56 +227,83 @@ class MetricLogger(object):
     def log_every(self, iterable, print_freq, header=None):
         i = 0
         if not header:
-            header = ''
+            header = ""
+        space_fmt = ":" + str(len(str(len(iterable)))) + "d"
+        if torch.cuda.is_available():
+            log_msg = self.delimiter.join(
+                [
+                    header,
+                    "[{0" + space_fmt + "}/{1}]",
+                    "eta: {eta}",
+                    "{meters}",
+                    "time: {time}",
+                    "data: {data}",
+                    "max mem: {memory:.0f}",
+                ]
+            )
+        else:
+            log_msg = self.delimiter.join(
+                [
+                    header,
+                    "[{0" + space_fmt + "}/{1}]",
+                    "eta: {eta}",
+                    "{meters}",
+                    "time: {time}",
+                    "data: {data}",
+                ]
+            )
+        MB = 1024.0 * 1024.0
+        iter_time = SmoothedValue(fmt="{avg:.6f}")
+        data_time = SmoothedValue(fmt="{avg:.6f}")
         start_time = time.time()
         end = time.time()
-        iter_time = SmoothedValue(fmt='{avg:.6f}')
-        data_time = SmoothedValue(fmt='{avg:.6f}')
-        space_fmt = ':' + str(len(str(len(iterable)))) + 'd'
-        if torch.cuda.is_available():
-            log_msg = self.delimiter.join([
-                header,
-                '[{0' + space_fmt + '}/{1}]',
-                'eta: {eta}',
-                '{meters}',
-                'time: {time}',
-                'data: {data}',
-                'max mem: {memory:.0f}'
-            ])
-        else:
-            log_msg = self.delimiter.join([
-                header,
-                '[{0' + space_fmt + '}/{1}]',
-                'eta: {eta}',
-                '{meters}',
-                'time: {time}',
-                'data: {data}'
-            ])
-        MB = 1024.0 * 1024.0
         for obj in iterable:
-            data_time.update(time.time() - end)
+            data_t = time.time() - end
+            data_time.update(data_t)
+            self.data_times.append(data_t)
             yield obj
-            iter_time.update(time.time() - end)
+            iter_t = time.time() - end
+            iter_time.update(iter_t)
+            self.iter_times.append(iter_t)
+            self.train_times.append(iter_t - data_t)
             if i % print_freq == 0 or i == len(iterable) - 1:
                 eta_seconds = iter_time.global_avg * (len(iterable) - i)
                 eta_string = str(datetime.timedelta(seconds=int(eta_seconds)))
                 if torch.cuda.is_available():
-                    print(log_msg.format(
-                        i, len(iterable), eta=eta_string,
-                        meters=str(self),
-                        time=str(iter_time), data=str(data_time),
-                        memory=torch.cuda.max_memory_allocated() / MB))
+                    print(
+                        log_msg.format(
+                            i,
+                            len(iterable),
+                            eta=eta_string,
+                            meters=str(self),
+                            time=str(iter_time),
+                            data=str(data_time),
+                            memory=torch.cuda.max_memory_allocated() / MB,
+                        )
+                    )
                 else:
-                    print(log_msg.format(
-                        i, len(iterable), eta=eta_string,
-                        meters=str(self),
-                        time=str(iter_time), data=str(data_time)))
+                    print(
+                        log_msg.format(
+                            i,
+                            len(iterable),
+                            eta=eta_string,
+                            meters=str(self),
+                            time=str(iter_time),
+                            data=str(data_time),
+                        )
+                    )
             i += 1
             end = time.time()
         total_time = time.time() - start_time
         total_time_str = str(datetime.timedelta(seconds=int(total_time)))
-        print('{} Total time: {} ({:.6f} s / it)'.format(
-            header, total_time_str, total_time / len(iterable)))
+        print(
+            "{} Total time: {} ({:.6f} s / it)".format(
+                header, total_time_str, total_time / len(iterable)
+            )
+        )
+
+    def get_times(self):
+        return self.iter_times, self.train_times, self.data_times
 
 
 def load_pretrained_weights(model, pretrained_weights, checkpoint_key):
@@ -279,7 +317,11 @@ def load_pretrained_weights(model, pretrained_weights, checkpoint_key):
         # remove `backbone.` prefix induced by multicrop wrapper
         state_dict = {k.replace("backbone.", ""): v for k, v in state_dict.items()}
         msg = model.load_state_dict(state_dict, strict=False)
-        print('Pretrained weights found at {} and loaded with msg: {}'.format(pretrained_weights, msg))
+        print(
+            "Pretrained weights found at {} and loaded with msg: {}".format(
+                pretrained_weights, msg
+            )
+        )
     else:
         print("=> no checkpoint found at '{}'".format(pretrained_weights))
 
@@ -326,17 +368,21 @@ def get_params_groups(model):
             not_regularized.append(param)
         else:
             regularized.append(param)
-    return [{'params': regularized}, {'params': not_regularized, 'weight_decay': 0.}]
+    return [{"params": regularized}, {"params": not_regularized, "weight_decay": 0.0}]
 
 
-def cosine_scheduler(base_value, final_value, epochs, niter_per_ep, warmup_epochs=0, start_warmup_value=0):
+def cosine_scheduler(
+    base_value, final_value, epochs, niter_per_ep, warmup_epochs=0, start_warmup_value=0
+):
     warmup_schedule = np.array([])
     warmup_iters = warmup_epochs * niter_per_ep
     if warmup_epochs > 0:
         warmup_schedule = np.linspace(start_warmup_value, base_value, warmup_iters)
 
     iters = np.arange(epochs * niter_per_ep - warmup_iters)
-    schedule = final_value + 0.5 * (base_value - final_value) * (1 + np.cos(np.pi * iters / len(iters)))
+    schedule = final_value + 0.5 * (base_value - final_value) * (
+        1 + np.cos(np.pi * iters / len(iters))
+    )
 
     schedule = np.concatenate((warmup_schedule, schedule))
     assert len(schedule) == epochs * niter_per_ep

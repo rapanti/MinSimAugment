@@ -2,7 +2,7 @@ import os
 import sys
 from typing import Sequence, Tuple
 
-from torch.utils.data import Dataset
+from torchvision.datasets import VisionDataset
 from torchvision.transforms import (
     CenterCrop,
     ColorJitter,
@@ -63,19 +63,20 @@ class MultiCropsTransform:
 
 
 def make_normalize_transform(
-    mean: Sequence[float], std: Sequence[float],
+    mean: Sequence[float],
+    std: Sequence[float],
 ) -> Normalize:
     return Normalize(mean=mean, std=std)
 
 
 def make_pretrain_transform(
-        crop_size: int = 224,
-        crop_scale: Tuple[float, float] = (0.2, 1.0),
-        interpolation: InterpolationMode = InterpolationMode.BILINEAR,
-        blur_prob: float = 0.5,
-        hflip_prob: float = 0.5,
-        mean: Sequence[float] = IMAGENET_DEFAULT_MEAN,
-        std: Sequence[float] = IMAGENET_DEFAULT_STD,
+    crop_size: int = 224,
+    crop_scale: Tuple[float, float] = (0.2, 1.0),
+    interpolation: InterpolationMode = InterpolationMode.BILINEAR,
+    blur_prob: float = 0.5,
+    hflip_prob: float = 0.5,
+    mean: Sequence[float] = IMAGENET_DEFAULT_MEAN,
+    std: Sequence[float] = IMAGENET_DEFAULT_STD,
 ):
     transforms_list = [
         RandomResizedCrop(crop_size, scale=crop_scale, interpolation=interpolation),
@@ -96,39 +97,41 @@ def make_pretrain_transform(
 
 
 def make_classification_train_transform(
-        crop_size: int = 224,
-        crop_scale: Tuple[float, float] = (0.08, 1.0),
-        interpolation: InterpolationMode = InterpolationMode.BICUBIC,
-        hflip_prob: float = 0.5,
-        mean: Sequence[float] = IMAGENET_DEFAULT_MEAN,
-        std: Sequence[float] = IMAGENET_DEFAULT_STD,
+    crop_size: int = 224,
+    crop_scale: Tuple[float, float] = (0.08, 1.0),
+    interpolation: InterpolationMode = InterpolationMode.BICUBIC,
+    hflip_prob: float = 0.5,
+    mean: Sequence[float] = IMAGENET_DEFAULT_MEAN,
+    std: Sequence[float] = IMAGENET_DEFAULT_STD,
 ):
     transforms_list = [
         RandomResizedCrop(crop_size, scale=crop_scale, interpolation=interpolation),
         RandomHorizontalFlip(p=hflip_prob),
         ToTensor(),
-        make_normalize_transform(mean=mean, std=std)
+        make_normalize_transform(mean=mean, std=std),
     ]
     return Compose(transforms_list)
 
 
 def make_classification_val_transform(
-        resize_size: int = 256,
-        crop_size: int = 224,
-        interpolation: InterpolationMode = InterpolationMode.BICUBIC,
-        mean: Sequence[float] = IMAGENET_DEFAULT_MEAN,
-        std: Sequence[float] = IMAGENET_DEFAULT_STD,
+    resize_size: int = 256,
+    crop_size: int = 224,
+    interpolation: InterpolationMode = InterpolationMode.BICUBIC,
+    mean: Sequence[float] = IMAGENET_DEFAULT_MEAN,
+    std: Sequence[float] = IMAGENET_DEFAULT_STD,
 ):
     transforms_list = [
         Resize(resize_size, interpolation=interpolation),
         CenterCrop(crop_size),
         ToTensor(),
-        make_normalize_transform(mean=mean, std=std)
+        make_normalize_transform(mean=mean, std=std),
     ]
     return Compose(transforms_list)
 
 
-def make_dataset(root: str, dataset: str, train: bool, transform) -> Tuple[Dataset, int]:
+def make_dataset(
+    root: str, dataset: str, train: bool, transform
+) -> Tuple[VisionDataset, int]:
     dataset = dataset.lower()
     if dataset == "cifar10":
         return CIFAR10(root, download=True, train=train, transform=transform), 10
@@ -145,7 +148,9 @@ def make_dataset(root: str, dataset: str, train: bool, transform) -> Tuple[Datas
         return StanfordCars(root, download=True, split=split, transform=transform), 196
     elif dataset == "inat21":
         version = "2021_train_mini" if train else "2021_valid"
-        return INaturalist(root, download=False, version=version, transform=transform), 10000
+        return INaturalist(
+            root, download=False, version=version, transform=transform
+        ), 10000
     elif dataset == "places365":
         split = "train-standard" if train else "val"
         return Places365(root, download=False, split=split, transform=transform), 365
@@ -153,8 +158,15 @@ def make_dataset(root: str, dataset: str, train: bool, transform) -> Tuple[Datas
         root = os.path.join(root, "train" if train else "val")
         return ImageFolder(root, transform=transform), 1000
     elif dataset == "test32":
-        return FakeData(size=1000, image_size=(3, 32, 32), num_classes=10, transform=transform), 10
+        return FakeData(
+            size=1000, image_size=(3, 32, 32), num_classes=10, transform=transform
+        ), 10
     elif dataset == "test224":
-        return FakeData(size=1000, image_size=(3, 224, 224), num_classes=1000, transform=transform), 1000
+        return FakeData(
+            size=32768,
+            image_size=(3, 224, 224),
+            num_classes=1000,
+            transform=transform,
+        ), 1000
     print(f"Does not support dataset: {dataset}")
     sys.exit(1)
