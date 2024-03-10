@@ -161,6 +161,7 @@ def main(cfg):
             linear_classifier=linear_classifier,
             optimizer=optimizer,
             fp16_scaler=fp16_scaler,
+            scheduler=scheduler,
         )
     else:
         # only classifier needs to be loaded
@@ -170,6 +171,7 @@ def main(cfg):
             linear_classifier=linear_classifier,
             optimizer=optimizer,
             fp16_scaler=fp16_scaler,
+            scheduler=scheduler,
         )
     start_epoch = to_restore["epoch"]
     best_acc = to_restore["best_acc"]
@@ -208,6 +210,7 @@ def main(cfg):
                 "linear_classifier": linear_classifier.state_dict(),
                 "best_acc": best_acc,
                 "fp16_scaler": fp16_scaler.state_dict() if fp16_scaler is not None else None,
+                "scheduler": scheduler.state_dict(),
             }
             path = os.path.join(cfg.output_dir, checkpoint_name)
             torch.save(save_dict, path)
