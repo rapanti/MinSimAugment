@@ -28,6 +28,10 @@ class MultiCropsTransform:
         self.local_crops_number = local_crops_number
 
     def __call__(self, x):
+        # print(x[".jpg"].shape)
+        # print(x)
+        x = x[".jpg"]
+        # print(x)
         images, params = [], []
         for n in range(self.num_crops):
             img, p = self.gt1(x) if n % 2 == 0 else self.gt2(x)

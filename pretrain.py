@@ -14,6 +14,7 @@ import torch.nn.parallel
 import torch.backends.cudnn as cudnn
 import torch.optim
 import torch.utils.data
+import wids
 from omegaconf import OmegaConf
 from torch.utils.data import DistributedSampler, DataLoader
 from torch.utils.tensorboard import SummaryWriter
@@ -77,19 +78,34 @@ def main(cfg):
     )
     two_crops_transform = data.MultiCropsTransform(gt1, gt2, lt,
                                                    cfg.num_global_crops_loader, cfg.num_local_crops_loader)
-    dataset, _ = data.make_dataset(cfg.data_path, cfg.dataset, True, two_crops_transform)
 
-    sampler = DistributedSampler(dataset)
-    batch_size_per_gpu = cfg.batch_size // cfg.grad_accum_steps // dist.get_world_size()
+    # dataset, _ = data.make_dataset(cfg.data_path, cfg.dataset, True, two_crops_transform)
+
+    # sampler = DistributedSampler(dataset)
+    dataset = wids.ShardListDataset(
+        os.path.join(cfg.data_path, 'train', "imagenet_train.json"),
+        cache_dir="/tmp/train",
+        keep=True,
+    )
+    dataset.add_transform(two_crops_transform)
+
+    sampler = wids.DistributedChunkedSampler(
+        dataset, chunksize=1000, shuffle=True, shufflefirst=True, seed=cfg.seed
+    )
+
+    cfg.batch_size_per_gpu = cfg.batch_size // cfg.grad_accum_steps // dist.get_world_size()
     data_loader = DataLoader(
         dataset,
         sampler=sampler,
-        batch_size=batch_size_per_gpu,
+        batch_size=cfg.batch_size_per_gpu,
         num_workers=cfg.num_workers,
         pin_memory=True,
         drop_last=True,
         collate_fn=custom_collate,
     )
+    steps_per_epoch = len(dataset) // (cfg.batch_size_per_gpu * dist.get_world_size())
+    cfg.steps_per_epoch = steps_per_epoch
+
     print(f"Data loaded: there are {len(dataset)} images.")
 
     # ============ building student and teacher networks ... ============
@@ -174,17 +190,20 @@ def main(cfg):
     lr_schedule = utils.cosine_scheduler(
         init_lr,
         cfg.min_lr,
-        cfg.epochs, len(data_loader),
+        cfg.epochs,
+        steps_per_epoch,
         warmup_epochs=cfg.warmup_epochs,
     )
     wd_schedule = utils.cosine_scheduler(
         cfg.weight_decay,
         cfg.weight_decay_end,
-        cfg.epochs, len(data_loader),
+        cfg.epochs,
+        steps_per_epoch,
     )
     # momentum parameter is increased to 1. during training with a cosine schedule
     momentum_schedule = utils.cosine_scheduler(cfg.momentum_teacher, 1,
-                                               cfg.epochs, len(data_loader))
+                                               cfg.epochs,
+                                               steps_per_epoch)
     print(f"Loss, optimizer and schedulers ready.")
 
     select_fn = MinSim(cfg.select_fn,
@@ -217,7 +236,8 @@ def main(cfg):
     board = SummaryWriter(log_dir) if dist.is_main_process() else None
 
     for epoch in range(start_epoch, cfg.epochs):
-        data_loader.sampler.set_epoch(epoch)
+        # data_loader.sampler.set_epoch(epoch)
+        sampler.set_epoch(epoch)
 
         start = time.time()
         train_stats, metrics = \
@@ -256,12 +276,14 @@ def train_one_epoch(student, teacher, teacher_without_ddp, dino_loss, data_loade
                     fp16, cfg, board, select_fn):
     metrics = defaultdict(list)
     metrics["epoch"] = epoch
-    metric_logger = utils.MetricLogger(delimiter=" ")
+    metric_logger = utils.MetricLogger(steps_per_epoch=cfg.steps_per_epoch, delimiter=" ")
     header = 'Epoch: [{}/{}]'.format(epoch, cfg.epochs)
     total_loss = 0
     for it, (images, params) in enumerate(metric_logger.log_every(data_loader, 10, header)):
         # update weight decay and learning rate according to their schedule
-        it = len(data_loader) * epoch + it  # global training iteration
+        it = cfg.steps_per_epoch * epoch + it  # global training iteration
+
+        print(images[0].shape)
 
         for i, param_group in enumerate(optimizer.param_groups):
             param_group["lr"] = lr_schedule[it]
