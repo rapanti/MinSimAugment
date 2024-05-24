@@ -20,12 +20,23 @@ from models import resnet, resnet_cifar, vision_transformer as vits
 from utils import distributed as dist, optimizers
 
 
+class MultiCropTransform:
+    def __init__(self, transform, n_crops):
+        self.transform = transform
+        self.n_crops = n_crops
+    
+    def __call__(self, x):
+        crops = [self.transform(x) for _ in range(self.n_crops)]
+        return crops
+        
+
+
 def main(cfg):
     dist.init_distributed_mode(cfg) if not dist.is_enabled() else None
     cudnn.benchmark = True
 
     print("git:\n  {}\n".format(utils.get_sha()))
-    print(OmegaConf.to_yaml(cfg))
+    # print(OmegaConf.to_yaml(cfg))
 
     # prepare data
     if cfg.dataset == "CIFAR10":
@@ -62,6 +73,7 @@ def main(cfg):
         std=std,
     )
 
+    train_transform = MultiCropTransform(train_transform, cfg.n_crops)
     train_data, _ = data.make_dataset(cfg.data_path, cfg.dataset, True, train_transform)
 
     sampler = torch.utils.data.distributed.DistributedSampler(train_data)
@@ -235,8 +247,14 @@ def train(loader, model, linear_classifier, criterion, optimizer, epoch, cfg, bo
     for it, (images, targets) in enumerate(metric_logger.log_every(loader, 10, header)):
         it = len(loader) * epoch + it
 
-        images = images.cuda(non_blocking=True)
+        if isinstance(images, list):
+            images = [img.cuda(non_blocking=True) for img in images]
+        else:
+            images = images.cuda(non_blocking=True)
         targets = targets.cuda(non_blocking=True)
+
+        if isinstance(images, list):
+            images = hard_view_selection(images, targets, model, linear_classifier)
 
         with torch.cuda.amp.autocast(fp16_scaler is not None):
             if cfg.finetune:
@@ -343,6 +361,19 @@ class LinearClassifier(nn.Module):
         return self.linear(x)
 
 
+@torch.no_grad()
+def hard_view_selection(images, targets, model, head):
+    out = torch.empty_like(images[0])
+    crit = nn.CrossEntropyLoss(reduction='none')
+    with torch.cuda.amp.autocast():
+        logits = [head(model(img)) for img in images]
+        loss = [crit(logit, targets) for logit in logits]
+    
+    indices = torch.stack(loss).argmax(dim=0)
+    for n in range(len(images)):
+        out = torch.where((indices == n)[:, None, None, None], images[n], out)
+    return out
+
 def get_args_parser():
     p = argparse.ArgumentParser(description='Linear-Eval for DINO', add_help=False)
     # model parameters
@@ -400,6 +431,10 @@ def get_args_parser():
                    help="number of data loading workers (default: 8)")
     p.add_argument('--val_freq', type=int,
                    help="Validate model every x epochs (default: 1)")
+    
+    p.add_argument(
+        "--n_crops", type=int, help="Number of crops for traianing (default: 1)"
+    )
 
     return p
 
