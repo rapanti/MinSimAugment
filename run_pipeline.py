@@ -125,18 +125,18 @@ if __name__ == "__main__":
     eval_linear_cfg.data_path = "/work/dlclarge1/ferreira-simsiam/minsim_experiments/datasets"
     eval_linear.main(eval_linear_cfg)
 
-    print('STARTING kNN EVALUATION')
-    # knn code currently times out when using multiple GPUs and when using cuda -> increase timeout interval to 10h
-    # make sure to run knn eval last
-    import torch.distributed as dist
-    dist.destroy_process_group()
+    # print('STARTING kNN EVALUATION')
+    # # knn code currently times out when using multiple GPUs and when using cuda -> increase timeout interval to 10h
+    # # make sure to run knn eval last
+    # import torch.distributed as dist
+    # dist.destroy_process_group()
 
-    eval_knn_cfg = OmegaConf.load("eval_knn.yaml")
-    # copy dist parameters
-    eval_knn_cfg.gpu = cfg.gpu
-    eval_knn_cfg.rank = cfg.rank
-    eval_knn_cfg.world_size = cfg.world_size
-    eval_knn_cfg.dist_url = cfg.dist_url
-    eval_knn_cfg.timeout = 1800*20
+    # eval_knn_cfg = OmegaConf.load("eval_knn.yaml")
+    # # copy dist parameters
+    # eval_knn_cfg.gpu = cfg.gpu
+    # eval_knn_cfg.rank = cfg.rank
+    # eval_knn_cfg.world_size = cfg.world_size
+    # eval_knn_cfg.dist_url = cfg.dist_url
+    # eval_knn_cfg.timeout = 1800*20
 
-    eval_knn.main(eval_knn_cfg)
+    # eval_knn.main(eval_knn_cfg)

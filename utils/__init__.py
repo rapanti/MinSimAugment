@@ -12,13 +12,14 @@ import torch.nn as nn
 from . import distributed as dist
 
 
-def fix_random_seeds(seed=0):
+def fix_random_seeds(seed=None):
     """
     Fix random seeds.
     """
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    np.random.seed(seed)
+    if seed is not None:
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+        np.random.seed(seed)
 
 
 def get_sha():

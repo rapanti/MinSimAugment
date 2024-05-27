@@ -28,10 +28,7 @@ class MultiCropsTransform:
         self.local_crops_number = local_crops_number
 
     def __call__(self, x):
-        # print(x[".jpg"].shape)
-        # print(x)
-        x = x[".jpg"]
-        # print(x)
+        x = x["jpg"]
         images, params = [], []
         for n in range(self.num_crops):
             img, p = self.gt1(x) if n % 2 == 0 else self.gt2(x)
@@ -41,7 +38,7 @@ class MultiCropsTransform:
             img, p = self.lt(x)
             images.append(img)
             params.append(p)
-        return images, params
+        return images
 
 
 def make_normalize_transform(
@@ -115,33 +112,34 @@ def make_dataset(
         dataset: str,
         train: bool,
         transform):
-    if dataset == 'CIFAR10':
+    dataset = dataset.lower()
+    if dataset == 'cifar10':
         return CIFAR10(root, download=True, train=train, transform=transform), 10
-    elif dataset == 'CIFAR100':
+    elif dataset == 'cifar100':
         return CIFAR100(root, download=True, train=train, transform=transform), 100
-    elif dataset == 'Food101':
+    elif dataset == 'food101':
         split = "train" if train else "test"
         return Food101(root, download=False, split=split, transform=transform), 101
-    elif dataset == "Flowers102":
+    elif dataset == "flowers102":
         split = "train" if train else "test"
         return Flowers102(root, download=True, split=split, transform=transform), 102
-    elif dataset == "StanfordCars":
+    elif dataset == "stanfordcars":
         split = "train" if train else "test"
         return StanfordCars(root, download=True, split=split, transform=transform), 196
     elif dataset == "inat21":
         version = "2021_train_mini" if train else "2021_valid"
         return INaturalist(root, download=False, version=version, transform=transform), 10000
-    elif dataset == "Places365":
+    elif dataset == "places365":
         split = "train-standard" if train else "val"
         return Places365(root, download=False, split=split, transform=transform), 365
-    elif dataset == 'ImageNet':
+    elif dataset == 'imagenet':
         root = os.path.join(root, 'train' if train else 'val')
         dataset = ImageFolder(root, transform=transform)
         return dataset, 1000
-    elif dataset == 'Test32':
+    elif dataset == 'test32':
         dataset = FakeData(size=1000, image_size=(3, 32, 32), num_classes=10, transform=transform)
         return dataset, 10
-    elif dataset == 'Test224':
+    elif dataset == 'test224':
         dataset = FakeData(size=1000, image_size=(3, 224, 224), num_classes=1000, transform=transform)
         return dataset, 1000
     print(f"Does not support dataset: {dataset}")
