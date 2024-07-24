@@ -91,7 +91,7 @@ def main(cfg):
     trainloader = trainloader.unbatched().shuffle(1000).batched(batch_size_per_gpu)
 
     # A resampled dataset is infinite size, but we can recreate a fixed epoch length.
-    steps_per_epoch = 1282 * 1000 // cfg.batch_size
+    steps_per_epoch = 1282 * 1000 // (cfg.batch_size // cfg.grad_accum_steps)
     data_loader = trainloader.with_epoch(steps_per_epoch)
     cfg.steps_per_epoch = steps_per_epoch
 
